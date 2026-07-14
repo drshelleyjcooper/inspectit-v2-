@@ -8,6 +8,7 @@ import runs in a single transaction — either everything lands or nothing does.
 Accepted body: the export payload itself, or anything wrapping it in a "data"
 object. Keys may or may not carry the "inspectit." prefix.
 """
+import json
 import re
 from typing import Any, Dict
 
@@ -421,6 +422,18 @@ def import_backup(body: dict = Body(...),
     data = body.get("data") if isinstance(body.get("data"), dict) else body
     # Strip the "inspectit." prefix so both key styles work.
     data = {k.split("inspectit.", 1)[-1]: v for k, v in data.items()}
+
+    # The app's real Export files store each value as a JSON *string* (its
+    # store.get returns raw strings); parse those. Non-JSON strings (e.g.
+    # diagram data URLs) stay as-is.
+    def _maybe_parse(v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except ValueError:
+                return v
+        return v
+    data = {k: _maybe_parse(v) for k, v in data.items()}
 
     with get_pool().connection() as conn:   # one transaction: all-or-nothing
         imp = Importer(conn, ctx)

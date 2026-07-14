@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .db import get_pool, run_migrations
 from .presets import seed_role_presets
-from .routers import assignments, auth, entities, importer, me, members
+from .routers import (assignments, auth, collections, entities, importer, me,
+                      members)
 
 
 @asynccontextmanager
@@ -39,6 +40,7 @@ app.include_router(members.router)
 app.include_router(entities.router)
 app.include_router(assignments.router)
 app.include_router(importer.router)
+app.include_router(collections.router)
 
 
 @app.get("/health")
