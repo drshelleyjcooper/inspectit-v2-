@@ -18,6 +18,10 @@ _pool = None
 def _database_url() -> str:
     if config.DATABASE_URL:
         return config.DATABASE_URL
+    if config.IS_PRODUCTION:
+        raise RuntimeError(
+            "DATABASE_URL must be set in production "
+            "(bind a Managed Postgres in the App Platform console)")
     import pgserver  # local dev only
 
     server = pgserver.get_server(str(config.PROJECT_ROOT / ".pgdata"))
