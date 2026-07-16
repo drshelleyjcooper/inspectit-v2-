@@ -1,0 +1,5 @@
+# Local development / tests (install with: pip install -r requirements-dev.txt)
+-r requirements.txt
+pgserver>=0.1.4
+pytest>=8.4
+httpx>=0.28

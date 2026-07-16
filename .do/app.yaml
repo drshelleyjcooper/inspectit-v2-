@@ -1,0 +1,51 @@
+name: inspectit
+region: nyc
+services:
+  - name: api
+    github:
+      repo: drshelleyjcooper/inspectit-v2-
+      branch: main
+      deploy_on_push: true
+    environment_slug: python
+    build_command: pip install -r requirements.txt
+    run_command: uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 2 --no-access-log
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    http_port: 8080
+    health_check:
+      http_path: /health
+    envs:
+      - key: APP_ENV
+        value: production
+      - key: JWT_SECRET
+        type: SECRET
+      - key: DATABASE_URL
+        value: ${inspectit-db.DATABASE_URL}
+      - key: ALLOWED_ORIGINS
+        value: https://inspectit.app,https://www.inspectit.app
+      - key: POOL_MAX
+        value: "5"
+      - key: STORAGE_BACKEND
+        value: s3
+      - key: SPACES_REGION
+        value: nyc3
+      - key: SPACES_BUCKET
+        value: inspectit-files
+      - key: SPACES_KEY
+        type: SECRET
+      - key: SPACES_SECRET
+        type: SECRET
+static_sites:
+  - name: web
+    github:
+      repo: drshelleyjcooper/inspectit-v2-
+      branch: main
+      deploy_on_push: true
+    source_dir: /
+    index_document: index.html
+    routes:
+      - path: /
+databases:
+  - name: inspectit-db
+    engine: PG
+    production: true
