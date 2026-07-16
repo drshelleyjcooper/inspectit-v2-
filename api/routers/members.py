@@ -1,5 +1,6 @@
 """Company membership management: roles listing, members, invitations."""
 import datetime as dt
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -97,6 +98,29 @@ def create_invitation(body: InviteIn,
     # The token goes in the invite email once a mailer exists; returned for now
     # so the admin can hand the link to the invitee directly.
     return {"invitation_id": str(inv["id"]), "token": token}
+
+
+@router.delete("/invitations/{invitation_id}")
+def revoke_invitation(invitation_id: str,
+                      ctx: AuthContext = Depends(require("company", "assign"))):
+    """F6 mitigation: a pending invite (and its token) can be killed at any
+    time. Full resolution of F6 = email delivery instead of returned tokens."""
+    try:
+        uuid.UUID(invitation_id)
+    except ValueError:
+        raise HTTPException(404, "Invitation not found")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE invitations SET status = 'revoked'
+               WHERE id = %s AND company_id = %s AND status = 'pending'
+               RETURNING id""",
+            (invitation_id, ctx.company_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "No pending invitation with that id")
+        audit(conn, ctx.company_id, ctx.user["id"], "delete", "invitation",
+              invitation_id)
+    return {"ok": True}
 
 
 @router.get("/invitations")

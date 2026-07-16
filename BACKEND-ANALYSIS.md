@@ -67,10 +67,10 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 | F1 | ~~H~~ **FIXED 2026-07-16** | CORS is wide open (`allow_origins=["*"]`) | Origins now come from `ALLOWED_ORIGINS` env (dev default `*`); production refuses to boot with a wildcard | — |
 | F2 | ~~H~~ **FIXED 2026-07-16** | JWT secret silently self-generates if unset | `APP_ENV=production` gate (`check_production_config`): boot fails without explicit `JWT_SECRET`, with `DEV_MODE=1`, or with wildcard/empty origins | — |
 | F3 | ~~H~~ **FIXED 2026-07-16** | No rate limiting on `/auth/*` | Per-client-IP sliding-window limiter on every auth route (default 10/min, `AUTH_RATE_LIMIT`/`AUTH_RATE_WINDOW_S`); honors X-Forwarded-For behind the DO proxy; 429 + Retry-After | — |
-| F4 | **H** | No request-body size limit | Uvicorn accepts unbounded bodies; a huge POST could exhaust memory/disk (import endpoint especially) | Content-Length middleware, reject > 50 MB |
-| F5 | **H** | Startup migrations can race | Two App Platform instances booting simultaneously both run migrations | Wrap `run_migrations()` in `pg_advisory_lock` |
-| F6 | **M** | Invitation token returned in the API response | Deliberate (no mailer), but any `company:assign` holder sees join tokens; combined with F-email gap it's the weakest auth link | Acceptable at launch (admin-only in practice); resolved when email delivery lands |
-| F7 | **M** | Connection pool (max 10) vs DO basic Postgres (~22 conn limit) | Two API instances would flirt with the cap | Set pool max via env (default 5 in prod) and/or use DO's built-in connection pool (PgBouncer) |
+| F4 | ~~H~~ **FIXED 2026-07-16** | No request-body size limit | `BodySizeLimitMiddleware`: bodies over **75 MB** (Brandon's decision; `MAX_BODY_MB` env) → 413; chunked bodies without Content-Length → 411 (closes the bypass). Sits inside CORS so browsers see the real error | — |
+| F5 | ~~H~~ **FIXED 2026-07-16** | Startup migrations can race | `pg_advisory_xact_lock(727001)` serializes `run_migrations()` across instances; auto-releases at commit | — |
+| F6 | ~~M~~ **MITIGATED 2026-07-16** | Invitation token returned in the API response | Added `DELETE /companies/{id}/invitations/{id}` — a pending invite/token can be revoked at any time. Token-in-response remains (deliberate) until email delivery lands | Full fix = mailer |
+| F7 | ~~M~~ **FIXED 2026-07-16** | Connection pool (max 10) vs DO basic Postgres (~22 conn limit) | `POOL_MIN`/`POOL_MAX` env; production defaults to max 5 | — |
 | F8 | **M** | No pagination on list endpoints / audit query | Fine at current scale; unbounded responses at fleet scale | Add `limit/offset` when per-record API lands |
 | F9 | **M** | Expired refresh-token / reset rows accumulate | Table growth, slow leak | Nightly delete job or opportunistic cleanup on login |
 | F10 | **L** | Import endpoint is not idempotent | Importing the same backup twice duplicates records | Documented as one-time; per-company "already imported" guard is easy if needed |
@@ -78,9 +78,12 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 | F12 | **L** | Audit rows lack IP / user-agent | Less forensic value | Add columns when there's a real user base |
 | F13 | **L** | No structured logging/metrics | App Platform captures stdout; enough for now | Add request logging middleware later |
 
-**Bottom line:** F1–F5 are the pre-deploy gate. **F1–F3 are fixed and tested
-(21-test suite green).** F4 (body-size limit) and F5 (migration lock) remain
-for the pre-deploy session — Step 4 of the integration plan below.
+**Bottom line:** **All pre-deploy blockers (F1–F5) are fixed and tested, and
+F6 is mitigated / F7 fixed (27-test suite green).** A follow-up quality pass
+on the F1–F3 commit also caught and fixed two defects in the new rate limiter
+(X-Forwarded-For trust direction; ineffective stale-key cleanup). Remaining
+code work before deploy: none — only Step-0 items (domain, DO token, GitHub)
+and the deploy itself.
 
 ---
 

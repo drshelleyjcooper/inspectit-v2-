@@ -28,16 +28,21 @@ def get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
         _pool = ConnectionPool(
-            _database_url(), min_size=1, max_size=10, open=True,
+            _database_url(), min_size=config.POOL_MIN,
+            max_size=config.POOL_MAX, open=True,
             kwargs={"row_factory": dict_row},
         )
     return _pool
 
 
 def run_migrations() -> list:
-    """Apply migrations/*.sql in filename order, exactly once each."""
+    """Apply migrations/*.sql in filename order, exactly once each.
+
+    Serialized via a transaction-scoped advisory lock so concurrently booting
+    instances can't race (F5); the lock releases automatically at commit."""
     applied = []
     with get_pool().connection() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(727001)")
         conn.execute(
             """CREATE TABLE IF NOT EXISTS schema_migrations (
                  filename text PRIMARY KEY,

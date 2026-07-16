@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
+from .bodylimit import BodySizeLimitMiddleware
 from .db import get_pool, run_migrations
 from .presets import seed_role_presets
 from .routers import (assignments, auth, collections, entities, importer, me,
@@ -24,6 +25,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Inspectit API", version="0.1.0", lifespan=lifespan)
+
+# Body limit first, CORS second: middleware added later wraps earlier, so
+# CORS ends up outermost and 413/411 rejections still carry CORS headers
+# (a browser would otherwise mask them as opaque network errors).
+app.add_middleware(BodySizeLimitMiddleware,
+                   max_bytes=config.MAX_BODY_MB * 1024 * 1024)
 
 # The app is served from a different origin (App Platform static site) than
 # the API, so CORS is required. Origins come from ALLOWED_ORIGINS; production

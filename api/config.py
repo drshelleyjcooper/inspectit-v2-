@@ -70,6 +70,14 @@ JWT_SECRET = _jwt_secret()
 # Auth-route rate limiting (per client IP): max requests per window.
 AUTH_RATE_LIMIT = int(os.environ.get("AUTH_RATE_LIMIT", "10"))
 AUTH_RATE_WINDOW_S = int(os.environ.get("AUTH_RATE_WINDOW_S", "60"))
+
+# Global request-body ceiling (F4). Decided 2026-07-16: 75 MB.
+MAX_BODY_MB = int(os.environ.get("MAX_BODY_MB", "75"))
+
+# Connection pool sizing (F7): DO basic Managed Postgres allows ~22
+# connections; stay well under it in production.
+POOL_MIN = int(os.environ.get("POOL_MIN", "1"))
+POOL_MAX = int(os.environ.get("POOL_MAX", "5" if IS_PRODUCTION else "10"))
 ACCESS_TOKEN_TTL_MIN = int(os.environ.get("ACCESS_TOKEN_TTL_MIN", "30"))
 REFRESH_TOKEN_TTL_DAYS = int(os.environ.get("REFRESH_TOKEN_TTL_DAYS", "30"))
 RESET_TOKEN_TTL_MIN = int(os.environ.get("RESET_TOKEN_TTL_MIN", "60"))

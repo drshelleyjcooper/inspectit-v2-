@@ -60,6 +60,8 @@ run_dev.py            local dev server
 | `APP_ENV` | `development` | `production` refuses unsafe settings (missing JWT_SECRET, DEV_MODE, wildcard origins) |
 | `ALLOWED_ORIGINS` | `*` (dev) | Comma-separated CORS origins; **required** in production |
 | `AUTH_RATE_LIMIT` / `AUTH_RATE_WINDOW_S` | 10 / 60 | Per-IP budget for /auth/* routes |
+| `MAX_BODY_MB` | 75 | Global request-body ceiling (413 above it) |
+| `POOL_MIN` / `POOL_MAX` | 1 / 10 (5 in prod) | Database connection pool bounds |
 | `JWT_SECRET` | dev: auto-generated `.jwt_secret` | **Required in prod** |
 | `DEV_MODE` | off | `1` returns reset tokens in responses (never in prod) |
 | `STORAGE_BACKEND` | `local` | `s3` for DigitalOcean Spaces |

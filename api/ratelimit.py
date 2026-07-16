@@ -34,9 +34,11 @@ class RateLimiter:
                 429, "Too many attempts — please wait a moment and try again.",
                 headers={"Retry-After": str(retry)})
         q.append(now)
-        # Opportunistic cleanup so idle keys don't accumulate forever.
+        # Opportunistic cleanup so idle keys don't accumulate forever: drop
+        # every key whose newest hit is already outside the window.
         if len(self._hits) > 10000:
-            for k in [k for k, v in self._hits.items() if not v]:
+            stale = [k for k, v in self._hits.items() if not v or v[-1] < cutoff]
+            for k in stale:
                 del self._hits[k]
 
     def reset(self):
@@ -47,11 +49,12 @@ auth_limiter = RateLimiter(config.AUTH_RATE_LIMIT, config.AUTH_RATE_WINDOW_S)
 
 
 def client_ip(request: Request) -> str:
-    """Real client IP: first X-Forwarded-For entry when behind the DO proxy,
-    else the socket peer."""
+    """Real client IP. Behind one trusted proxy (DO App Platform), the LAST
+    X-Forwarded-For entry is the address the proxy itself observed; earlier
+    entries are client-supplied and spoofable — never trust them."""
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        return fwd.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 
