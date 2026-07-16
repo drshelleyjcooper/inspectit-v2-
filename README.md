@@ -57,6 +57,9 @@ run_dev.py            local dev server
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | *(embedded pgserver)* | Set to the DO Managed Postgres URL in prod |
+| `APP_ENV` | `development` | `production` refuses unsafe settings (missing JWT_SECRET, DEV_MODE, wildcard origins) |
+| `ALLOWED_ORIGINS` | `*` (dev) | Comma-separated CORS origins; **required** in production |
+| `AUTH_RATE_LIMIT` / `AUTH_RATE_WINDOW_S` | 10 / 60 | Per-IP budget for /auth/* routes |
 | `JWT_SECRET` | dev: auto-generated `.jwt_secret` | **Required in prod** |
 | `DEV_MODE` | off | `1` returns reset tokens in responses (never in prod) |
 | `STORAGE_BACKEND` | `local` | `s3` for DigitalOcean Spaces |

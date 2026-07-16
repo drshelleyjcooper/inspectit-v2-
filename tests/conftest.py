@@ -30,6 +30,9 @@ shutil.rmtree(_store, ignore_errors=True)
 os.environ["DATABASE_URL"] = make_conninfo(**_params)
 os.environ["DEV_MODE"] = "1"
 os.environ["STORAGE_DIR"] = str(_store)
+# The suite makes many auth calls from one client; the per-IP limiter is
+# exercised explicitly in test_zz_hardening.py with a tightened budget.
+os.environ["AUTH_RATE_LIMIT"] = "1000"
 
 
 @pytest.fixture(scope="session")

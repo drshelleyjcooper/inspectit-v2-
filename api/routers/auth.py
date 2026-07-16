@@ -3,13 +3,17 @@ and invitation acceptance."""
 import datetime as dt
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, security
 from ..db import audit, get_pool
+from ..ratelimit import rate_limit_auth
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+# Every /auth route is rate-limited per client IP (F3): these are the only
+# endpoints an attacker can hammer without a valid token.
+router = APIRouter(prefix="/auth", tags=["auth"],
+                   dependencies=[Depends(rate_limit_auth)])
 
 EMAIL_MIN = 5  # light validation; real email verification comes with the mailer
 PASSWORD_MIN = 8

@@ -64,9 +64,9 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 
 | # | Sev | Finding | Detail / consequence | Fix |
 |---|---|---|---|---|
-| F1 | **H** | CORS is wide open (`allow_origins=["*"]`) | Any website could call the API with a victim's token if it leaked; fine for localhost, wrong for prod | Restrict to the app's real origin(s) via env var |
-| F2 | **H** | JWT secret silently self-generates if unset | In prod, each deploy/instance would mint its own secret → all users logged out per deploy, and ops never notices | Add `APP_ENV=production` gate: refuse to boot without explicit `JWT_SECRET` (and with `DEV_MODE=1`) |
-| F3 | **H** | No rate limiting on `/auth/login`, `/auth/forgot`, `/auth/refresh` | Online password brute-forcing is only slowed by bcrypt cost | Add a simple per-IP limiter (e.g. 10/min on auth routes) — in-process is fine for one instance |
+| F1 | ~~H~~ **FIXED 2026-07-16** | CORS is wide open (`allow_origins=["*"]`) | Origins now come from `ALLOWED_ORIGINS` env (dev default `*`); production refuses to boot with a wildcard | — |
+| F2 | ~~H~~ **FIXED 2026-07-16** | JWT secret silently self-generates if unset | `APP_ENV=production` gate (`check_production_config`): boot fails without explicit `JWT_SECRET`, with `DEV_MODE=1`, or with wildcard/empty origins | — |
+| F3 | ~~H~~ **FIXED 2026-07-16** | No rate limiting on `/auth/*` | Per-client-IP sliding-window limiter on every auth route (default 10/min, `AUTH_RATE_LIMIT`/`AUTH_RATE_WINDOW_S`); honors X-Forwarded-For behind the DO proxy; 429 + Retry-After | — |
 | F4 | **H** | No request-body size limit | Uvicorn accepts unbounded bodies; a huge POST could exhaust memory/disk (import endpoint especially) | Content-Length middleware, reject > 50 MB |
 | F5 | **H** | Startup migrations can race | Two App Platform instances booting simultaneously both run migrations | Wrap `run_migrations()` in `pg_advisory_lock` |
 | F6 | **M** | Invitation token returned in the API response | Deliberate (no mailer), but any `company:assign` holder sees join tokens; combined with F-email gap it's the weakest auth link | Acceptable at launch (admin-only in practice); resolved when email delivery lands |
@@ -78,8 +78,9 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 | F12 | **L** | Audit rows lack IP / user-agent | Less forensic value | Add columns when there's a real user base |
 | F13 | **L** | No structured logging/metrics | App Platform captures stdout; enough for now | Add request logging middleware later |
 
-**Bottom line:** F1–F5 are the pre-deploy gate. All five are under ~100 lines
-of code combined and are folded into Step 4 of the integration plan below.
+**Bottom line:** F1–F5 are the pre-deploy gate. **F1–F3 are fixed and tested
+(21-test suite green).** F4 (body-size limit) and F5 (migration lock) remain
+for the pre-deploy session — Step 4 of the integration plan below.
 
 ---
 

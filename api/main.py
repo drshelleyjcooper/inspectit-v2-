@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import config
 from .db import get_pool, run_migrations
 from .presets import seed_role_presets
 from .routers import (assignments, auth, collections, entities, importer, me,
@@ -25,11 +26,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Inspectit API", version="0.1.0", lifespan=lifespan)
 
 # The app is served from a different origin (App Platform static site) than
-# the API, so CORS is required. Tighten allow_origins to the real domain at
-# deploy time.
+# the API, so CORS is required. Origins come from ALLOWED_ORIGINS; production
+# refuses to boot with a wildcard (config.check_production_config).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=config.ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
