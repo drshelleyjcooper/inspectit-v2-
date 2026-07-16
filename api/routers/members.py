@@ -164,7 +164,7 @@ def audit_trail(response: Response,
             params).fetchone()["n"]
         rows = conn.execute(
             f"""SELECT id, user_id, action, subject_type, subject_id,
-                       details, at
+                       details, ip, user_agent, at
                 FROM audit_log WHERE {where}
                 ORDER BY at DESC LIMIT %s OFFSET %s""",
             params + [limit, offset]).fetchall()

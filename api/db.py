@@ -94,10 +94,14 @@ def cleanup_user_tokens(conn, user_id):
 def audit(conn, company_id, user_id, action, subject_type=None, subject_id=None,
           details=None):
     from psycopg.types.json import Jsonb
+
+    from .requestmeta import request_meta
+    meta = request_meta.get() or {}
     conn.execute(
         """INSERT INTO audit_log (company_id, user_id, action, subject_type,
-                                  subject_id, details)
-           VALUES (%s, %s, %s, %s, %s, %s)""",
+                                  subject_id, details, ip, user_agent)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
         (company_id, user_id, action, subject_type, subject_id,
-         Jsonb(details) if details is not None else None),
+         Jsonb(details) if details is not None else None,
+         meta.get("ip"), meta.get("user_agent")),
     )

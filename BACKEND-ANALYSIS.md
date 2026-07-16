@@ -74,13 +74,13 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 | F8 | ~~M~~ **FIXED 2026-07-16** | No pagination on list endpoints / audit query | All list endpoints take `?limit` (max 500) `&offset` + return `X-Total-Count`; assigned-scope filtering moved into SQL so pages stay correct. **Also built the missing `GET /companies/{id}/audit` endpoint** (admin-only, filterable, newest-first) | — |
 | F9 | ~~M~~ **FIXED 2026-07-16** | Expired refresh-token / reset rows accumulate | `cleanup_expired()` purges dead tokens/resets + flips overdue invitations to `expired` at every startup; login additionally sweeps that user's dead rows. No scheduler needed | — |
 | F10 | ~~L~~ **FIXED 2026-07-16** | Import endpoint is not idempotent | Re-import now returns 409 (guarded by the audit trail's import marker); explicit `?force=true` overrides deliberately | — |
-| F11 | **L** | `files.kind` falls back to `pdf` for unknown MIME types | Cosmetic mislabeling only | Map unknowns to a `bin` kind later |
-| F12 | **L** | Audit rows lack IP / user-agent | Less forensic value | Add columns when there's a real user base |
-| F13 | **L** | No structured logging/metrics | App Platform captures stdout; enough for now | Add request logging middleware later |
+| F11 | ~~L~~ **FIXED 2026-07-16** | `files.kind` falls back to `pdf` for unknown MIME types | Unknown MIME types now stored as kind `bin` (migration 003 widens the CHECK) | — |
+| F12 | ~~L~~ **FIXED 2026-07-16** | Audit rows lack IP / user-agent | `audit_log.ip` + `user_agent` columns (migration 003); populated automatically via a request-context middleware — no endpoint changes needed; surfaced in `GET /audit` | — |
+| F13 | ~~L~~ **FIXED 2026-07-16** | No structured logging/metrics | JSON-lines access log to stdout (method, path, status, duration ms, client IP); `/health` probes excluded; run prod uvicorn with `--no-access-log` to avoid duplicates | — |
 
-**Bottom line:** **F1–F10 are all resolved (F6 mitigated pending a mailer);
-31-test suite green.** Only cosmetic/observability items F11–F13 remain, none
-deploy-relevant. A follow-up quality pass
+**Bottom line:** **ALL 13 findings resolved (F6 mitigated pending a mailer);
+34-test suite green.** The analysis punch list is closed — remaining work is
+deployment itself (§6) and the product roadmap (§7). A follow-up quality pass
 on the F1–F3 commit also caught and fixed two defects in the new rate limiter
 (X-Forwarded-For trust direction; ineffective stale-key cleanup). Remaining
 code work before deploy: none — only Step-0 items (domain, DO token, GitHub)
@@ -178,7 +178,7 @@ services:
       branch: main
       deploy_on_push: true
     environment_slug: python
-    run_command: uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 2
+    run_command: uvicorn api.main:app --host 0.0.0.0 --port $PORT --workers 2 --no-access-log
     instance_size_slug: basic-xxs        # $5/mo
     instance_count: 1
     http_port: 8080

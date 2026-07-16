@@ -298,3 +298,46 @@ def test_reimport_blocked_without_force(client):
                     headers=h, json=payload)
     assert r.status_code == 200
     assert r.json()["imported"]["vehicles"] == 1
+
+
+# ---------- F11: unknown MIME types labeled 'bin', not 'pdf' ----------
+
+def test_unknown_mime_kind_is_bin(client):
+    from api.db import get_pool
+    from api.storage import store_file
+
+    cid, _ = STATE["pageco"]
+    with get_pool().connection() as conn:
+        fid = store_file(conn, cid, None, "archive.zip",
+                         "application/zip", b"PKfake")
+        kind = conn.execute("SELECT kind FROM files WHERE id = %s",
+                            (fid,)).fetchone()["kind"]
+    assert kind == "bin"
+
+
+# ---------- F12: audit rows carry ip + user agent ----------
+
+def test_audit_rows_have_request_meta(client):
+    cid, tok = STATE["pageco"]
+    h = {"Authorization": f"Bearer {tok}"}
+    r = client.get(f"/companies/{cid}/audit?limit=1", headers=h)
+    assert r.status_code == 200
+    entry = r.json()[0]   # newest entry (the force-import from F10 test)
+    assert entry["ip"]                       # e.g. "testclient"
+    assert entry["user_agent"]               # TestClient sends "testclient"
+
+
+# ---------- F13: structured access log ----------
+
+def test_access_log_emits_json_lines(client, caplog):
+    import json as _json
+    import logging as _logging
+
+    with caplog.at_level(_logging.INFO, logger="inspectit.access"):
+        client.get("/me")          # unauthenticated -> 401, still logged
+        client.get("/health")      # must NOT be logged (probe noise)
+    lines = [_json.loads(rec.message) for rec in caplog.records
+             if rec.name == "inspectit.access"]
+    assert any(l["path"] == "/me" and l["status"] == 401 and "ms" in l
+               for l in lines)
+    assert not any(l["path"] == "/health" for l in lines)

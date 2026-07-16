@@ -99,6 +99,6 @@ def store_file(conn, company_id, uploaded_by, filename, mime, data: bytes,
                               mime, size_bytes, kind, attached_to_type, attached_to_id)
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (company_id, uploaded_by, key, filename or "file", mime, len(data),
-         kind or MIME_KIND.get(mime, "pdf"), attached_to_type, attached_to_id),
+         kind or MIME_KIND.get(mime, "bin"), attached_to_type, attached_to_id),
     ).fetchone()
     return str(row["id"])
