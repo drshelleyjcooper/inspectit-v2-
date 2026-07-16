@@ -2,7 +2,7 @@
 Requires the `assign` action on the module matching the subject type."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..db import audit, get_pool
@@ -67,6 +67,8 @@ def create_assignment(body: AssignIn,
 @router.get("/assignments")
 def list_assignments(subject_type: Optional[str] = None,
                      user_id: Optional[str] = None,
+                     limit: int = Query(100, ge=1, le=500),
+                     offset: int = Query(0, ge=0),
                      ctx: AuthContext = Depends(company_member)):
     assignable = [st for st, mod in SUBJECT_MODULE.items()
                   if ctx.grant_scope(mod, "assign")]
@@ -82,9 +84,9 @@ def list_assignments(subject_type: Optional[str] = None,
                  AND subject_type = ANY(%s)
                  AND (%s::text IS NULL OR subject_type = %s)
                  AND (%s::uuid IS NULL OR user_id = %s)
-               ORDER BY created_at DESC""",
+               ORDER BY created_at DESC LIMIT %s OFFSET %s""",
             (ctx.company_id, assignable, subject_type, subject_type,
-             user_id, user_id),
+             user_id, user_id, limit, offset),
         ).fetchall()
     return [{**r, "id": str(r["id"]), "user_id": str(r["user_id"]),
              "subject_id": str(r["subject_id"])} for r in rows]

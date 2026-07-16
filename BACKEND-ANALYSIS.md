@@ -71,15 +71,16 @@ Severity: **[H]** fix before deploy · **[M]** fix soon after · **[L]** note fo
 | F5 | ~~H~~ **FIXED 2026-07-16** | Startup migrations can race | `pg_advisory_xact_lock(727001)` serializes `run_migrations()` across instances; auto-releases at commit | — |
 | F6 | ~~M~~ **MITIGATED 2026-07-16** | Invitation token returned in the API response | Added `DELETE /companies/{id}/invitations/{id}` — a pending invite/token can be revoked at any time. Token-in-response remains (deliberate) until email delivery lands | Full fix = mailer |
 | F7 | ~~M~~ **FIXED 2026-07-16** | Connection pool (max 10) vs DO basic Postgres (~22 conn limit) | `POOL_MIN`/`POOL_MAX` env; production defaults to max 5 | — |
-| F8 | **M** | No pagination on list endpoints / audit query | Fine at current scale; unbounded responses at fleet scale | Add `limit/offset` when per-record API lands |
-| F9 | **M** | Expired refresh-token / reset rows accumulate | Table growth, slow leak | Nightly delete job or opportunistic cleanup on login |
-| F10 | **L** | Import endpoint is not idempotent | Importing the same backup twice duplicates records | Documented as one-time; per-company "already imported" guard is easy if needed |
+| F8 | ~~M~~ **FIXED 2026-07-16** | No pagination on list endpoints / audit query | All list endpoints take `?limit` (max 500) `&offset` + return `X-Total-Count`; assigned-scope filtering moved into SQL so pages stay correct. **Also built the missing `GET /companies/{id}/audit` endpoint** (admin-only, filterable, newest-first) | — |
+| F9 | ~~M~~ **FIXED 2026-07-16** | Expired refresh-token / reset rows accumulate | `cleanup_expired()` purges dead tokens/resets + flips overdue invitations to `expired` at every startup; login additionally sweeps that user's dead rows. No scheduler needed | — |
+| F10 | ~~L~~ **FIXED 2026-07-16** | Import endpoint is not idempotent | Re-import now returns 409 (guarded by the audit trail's import marker); explicit `?force=true` overrides deliberately | — |
 | F11 | **L** | `files.kind` falls back to `pdf` for unknown MIME types | Cosmetic mislabeling only | Map unknowns to a `bin` kind later |
 | F12 | **L** | Audit rows lack IP / user-agent | Less forensic value | Add columns when there's a real user base |
 | F13 | **L** | No structured logging/metrics | App Platform captures stdout; enough for now | Add request logging middleware later |
 
-**Bottom line:** **All pre-deploy blockers (F1–F5) are fixed and tested, and
-F6 is mitigated / F7 fixed (27-test suite green).** A follow-up quality pass
+**Bottom line:** **F1–F10 are all resolved (F6 mitigated pending a mailer);
+31-test suite green.** Only cosmetic/observability items F11–F13 remain, none
+deploy-relevant. A follow-up quality pass
 on the F1–F3 commit also caught and fixed two defects in the new rate limiter
 (X-Forwarded-For trust direction; ineffective stale-key cleanup). Remaining
 code work before deploy: none — only Step-0 items (domain, DO token, GitHub)

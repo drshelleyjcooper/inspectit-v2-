@@ -12,7 +12,7 @@ import json
 import re
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, HTTPException
 from psycopg.types.json import Jsonb
 
 from ..db import audit, get_pool
@@ -417,8 +417,22 @@ class Importer:
 
 
 @router.post("/import/backup")
-def import_backup(body: dict = Body(...),
+def import_backup(body: dict = Body(...), force: bool = False,
                   ctx: AuthContext = Depends(require("company", "edit"))):
+    # F10: importing is meant to be one-time — a second run would duplicate
+    # every record. The audit trail's import marker is the guard; ?force=true
+    # (explicit, deliberate) overrides it.
+    with get_pool().connection() as conn:
+        prior = conn.execute(
+            """SELECT 1 FROM audit_log
+               WHERE company_id = %s AND subject_type = 'import' LIMIT 1""",
+            (ctx.company_id,),
+        ).fetchone()
+    if prior and not force:
+        raise HTTPException(
+            409, "This company has already imported a backup. Importing again "
+                 "would duplicate records — add ?force=true to do it anyway.")
+
     data = body.get("data") if isinstance(body.get("data"), dict) else body
     # Strip the "inspectit." prefix so both key styles work.
     data = {k.split("inspectit.", 1)[-1]: v for k, v in data.items()}

@@ -61,6 +61,36 @@ def run_migrations() -> list:
     return applied
 
 
+def cleanup_expired(conn) -> dict:
+    """F9: purge rows that can never be used again. Runs at startup; login
+    additionally does a per-user sweep. No scheduler needed at this scale."""
+    stats = {}
+    stats["refresh_tokens"] = conn.execute(
+        """DELETE FROM refresh_tokens
+           WHERE expires_at < now()
+              OR (revoked_at IS NOT NULL
+                  AND revoked_at < now() - interval '30 days')""").rowcount
+    stats["password_resets"] = conn.execute(
+        "DELETE FROM password_resets WHERE expires_at < now()").rowcount
+    stats["invitations_expired"] = conn.execute(
+        """UPDATE invitations SET status = 'expired'
+           WHERE status = 'pending' AND expires_at < now()""").rowcount
+    return stats
+
+
+def cleanup_user_tokens(conn, user_id):
+    """Per-user variant, piggybacked on login (cheap, targeted)."""
+    conn.execute(
+        """DELETE FROM refresh_tokens
+           WHERE user_id = %s
+             AND (expires_at < now() OR revoked_at IS NOT NULL)""",
+        (user_id,))
+    conn.execute(
+        """DELETE FROM password_resets
+           WHERE user_id = %s AND (expires_at < now() OR used_at IS NOT NULL)""",
+        (user_id,))
+
+
 def audit(conn, company_id, user_id, action, subject_type=None, subject_id=None,
           details=None):
     from psycopg.types.json import Jsonb

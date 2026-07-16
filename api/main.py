@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import config
 from .bodylimit import BodySizeLimitMiddleware
-from .db import get_pool, run_migrations
+from .db import cleanup_expired, get_pool, run_migrations
 from .presets import seed_role_presets
 from .routers import (assignments, auth, collections, entities, importer, me,
                       members)
@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     run_migrations()
     with get_pool().connection() as conn:
         seed_role_presets(conn)
+        cleanup_expired(conn)   # F9: purge dead token/reset/invite rows
     yield
 
 

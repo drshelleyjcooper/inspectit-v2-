@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import config, security
-from ..db import audit, get_pool
+from ..db import audit, cleanup_user_tokens, get_pool
 from ..ratelimit import rate_limit_auth
 
 # Every /auth route is rate-limited per client IP (F3): these are the only
@@ -109,6 +109,7 @@ def login(body: LoginIn):
         if not user or not user["password_hash"] or \
                 not security.verify_password(body.password, user["password_hash"]):
             raise HTTPException(401, "Invalid email or password")
+        cleanup_user_tokens(conn, user["id"])   # F9: opportunistic sweep
         return {"user_id": str(user["id"]), **_token_pair(conn, user["id"])}
 
 

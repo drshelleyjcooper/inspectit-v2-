@@ -4,6 +4,8 @@ import time
 
 import pytest
 
+STATE = {}
+
 
 # ---------- F2: production config gate (pure function) ----------
 
@@ -192,3 +194,107 @@ def test_invitation_revocation(client):
                          headers=h).status_code == 404
     assert client.delete(f"/companies/{cid}/invitations/not-a-uuid",
                          headers=h).status_code == 404
+
+
+# ---------- F8: pagination + audit endpoint ----------
+
+def test_pagination_and_audit(client):
+    r = client.post("/auth/signup", json={
+        "company_name": "PageCo", "name": "Pat",
+        "email": "pat@pageco.com", "password": "pagepass123"})
+    cid, tok = r.json()["company_id"], r.json()["access_token"]
+    h = {"Authorization": f"Bearer {tok}"}
+
+    vehicles = [{"id": f"v{i}", "vehicleId": f"V-{i:02d}", "type": "auto"}
+                for i in range(3)]
+    r = client.post(f"/companies/{cid}/import/backup", headers=h,
+                    json={"data": {"inspectit.vehicles": vehicles}})
+    assert r.status_code == 200
+
+    r = client.get(f"/companies/{cid}/vehicles?limit=2", headers=h)
+    assert len(r.json()) == 2
+    assert r.headers["x-total-count"] == "3"
+    r2 = client.get(f"/companies/{cid}/vehicles?limit=2&offset=2", headers=h)
+    assert [v["vehicle_id"] for v in r2.json()] == ["V-02"]
+    assert client.get(f"/companies/{cid}/vehicles?limit=9999",
+                      headers=h).status_code == 422  # over MAX_PAGE
+
+    # audit endpoint: exists, paginated, filterable, admin-gated
+    r = client.get(f"/companies/{cid}/audit?limit=5", headers=h)
+    assert r.status_code == 200
+    assert int(r.headers["x-total-count"]) >= 2   # signup + import entries
+    actions = {e["action"] for e in r.json()}
+    assert "create" in actions
+    STATE["pageco"] = (cid, tok)
+
+
+# ---------- F9: expired-row cleanup ----------
+
+def test_cleanup_expired_rows(client):
+    import uuid as _uuid
+    from api.db import cleanup_expired, get_pool
+
+    cid, tok = STATE["pageco"]
+    with get_pool().connection() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE email = %s",
+                           ("pat@pageco.com",)).fetchone()["id"]
+        conn.execute(
+            """INSERT INTO refresh_tokens (jti, user_id, expires_at)
+               VALUES (%s, %s, now() - interval '1 day')""",
+            (_uuid.uuid4(), uid))
+        conn.execute(
+            """INSERT INTO password_resets (token_hash, user_id, expires_at)
+               VALUES ('deadhash', %s, now() - interval '1 hour')""", (uid,))
+        conn.execute(
+            """INSERT INTO invitations (company_id, email, role_ids, token,
+                                        invited_by, expires_at)
+               VALUES (%s, 'late@x.com', '{}', 'expiredtok', %s,
+                       now() - interval '1 day')""", (cid, uid))
+        stats = cleanup_expired(conn)
+        assert stats["refresh_tokens"] >= 1
+        assert stats["password_resets"] >= 1
+        assert stats["invitations_expired"] >= 1
+        status = conn.execute(
+            "SELECT status FROM invitations WHERE token = 'expiredtok'"
+        ).fetchone()["status"]
+        assert status == "expired"
+
+
+def test_login_sweeps_users_dead_tokens(client):
+    import uuid as _uuid
+    from api.db import get_pool
+
+    with get_pool().connection() as conn:
+        uid = conn.execute("SELECT id FROM users WHERE email = %s",
+                           ("pat@pageco.com",)).fetchone()["id"]
+        conn.execute(
+            """INSERT INTO refresh_tokens (jti, user_id, expires_at)
+               VALUES (%s, %s, now() - interval '1 day')""",
+            (_uuid.uuid4(), uid))
+    r = client.post("/auth/login", json={
+        "email": "pat@pageco.com", "password": "pagepass123"})
+    assert r.status_code == 200
+    with get_pool().connection() as conn:
+        n = conn.execute(
+            """SELECT count(*) AS n FROM refresh_tokens
+               WHERE user_id = %s AND expires_at < now()""",
+            (uid,)).fetchone()["n"]
+    assert n == 0
+
+
+# ---------- F10: import idempotency guard ----------
+
+def test_reimport_blocked_without_force(client):
+    cid, tok = STATE["pageco"]
+    h = {"Authorization": f"Bearer {tok}"}
+    payload = {"data": {"inspectit.vehicles":
+                        [{"id": "vx", "vehicleId": "DUP-1", "type": "auto"}]}}
+
+    r = client.post(f"/companies/{cid}/import/backup", headers=h, json=payload)
+    assert r.status_code == 409
+    assert "force" in r.json()["detail"]
+
+    r = client.post(f"/companies/{cid}/import/backup?force=true",
+                    headers=h, json=payload)
+    assert r.status_code == 200
+    assert r.json()["imported"]["vehicles"] == 1

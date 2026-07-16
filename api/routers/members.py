@@ -3,7 +3,9 @@ import datetime as dt
 import uuid
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from .. import config, security
@@ -27,7 +29,9 @@ def list_roles(ctx: AuthContext = Depends(company_member)):
 
 
 @router.get("/members")
-def list_members(ctx: AuthContext = Depends(company_member)):
+def list_members(limit: int = Query(200, ge=1, le=500),
+                 offset: int = Query(0, ge=0),
+                 ctx: AuthContext = Depends(company_member)):
     """Members with their roles. Needs company:view (admin) or any assign
     permission (managers must see who they can assign)."""
     can = ctx.grant_scope("company", "view") or any(
@@ -47,8 +51,8 @@ def list_members(ctx: AuthContext = Depends(company_member)):
                LEFT JOIN roles r ON r.id = mr.role_id AND r.deleted_at IS NULL
                WHERE m.company_id = %s AND m.deleted_at IS NULL
                GROUP BY m.id, m.status, u.id, u.name, u.email
-               ORDER BY u.name""",
-            (ctx.company_id,),
+               ORDER BY u.name LIMIT %s OFFSET %s""",
+            (ctx.company_id, limit, offset),
         ).fetchall()
     return [{**r, "membership_id": str(r["membership_id"]),
              "user_id": str(r["user_id"])} for r in rows]
@@ -124,11 +128,48 @@ def revoke_invitation(invitation_id: str,
 
 
 @router.get("/invitations")
-def list_invitations(ctx: AuthContext = Depends(require("company", "view"))):
+def list_invitations(limit: int = Query(100, ge=1, le=500),
+                     offset: int = Query(0, ge=0),
+                     ctx: AuthContext = Depends(require("company", "view"))):
     with get_pool().connection() as conn:
         rows = conn.execute(
             """SELECT id, email, status, expires_at, created_at FROM invitations
-               WHERE company_id = %s ORDER BY created_at DESC""",
-            (ctx.company_id,),
+               WHERE company_id = %s ORDER BY created_at DESC
+               LIMIT %s OFFSET %s""",
+            (ctx.company_id, limit, offset),
         ).fetchall()
     return [{**r, "id": str(r["id"])} for r in rows]
+
+
+@router.get("/audit")
+def audit_trail(response: Response,
+                subject_type: Optional[str] = None,
+                subject_id: Optional[str] = None,
+                limit: int = Query(100, ge=1, le=500),
+                offset: int = Query(0, ge=0),
+                ctx: AuthContext = Depends(require("company", "view"))):
+    """The company audit trail ("who deleted that inspection?"). Admin-only
+    (company:view). Optional subject filters; newest first."""
+    with get_pool().connection() as conn:
+        where = "company_id = %s"
+        params = [ctx.company_id]
+        if subject_type:
+            where += " AND subject_type = %s"
+            params.append(subject_type)
+        if subject_id:
+            where += " AND subject_id = %s"
+            params.append(subject_id)
+        total = conn.execute(
+            f"SELECT count(*) AS n FROM audit_log WHERE {where}",
+            params).fetchone()["n"]
+        rows = conn.execute(
+            f"""SELECT id, user_id, action, subject_type, subject_id,
+                       details, at
+                FROM audit_log WHERE {where}
+                ORDER BY at DESC LIMIT %s OFFSET %s""",
+            params + [limit, offset]).fetchall()
+    response.headers["X-Total-Count"] = str(total)
+    return [{**r,
+             "user_id": str(r["user_id"]) if r["user_id"] else None,
+             "subject_id": str(r["subject_id"]) if r["subject_id"] else None}
+            for r in rows]
