@@ -157,6 +157,10 @@ def audit_trail(response: Response,
             where += " AND subject_type = %s"
             params.append(subject_type)
         if subject_id:
+            try:
+                uuid.UUID(subject_id)
+            except ValueError:
+                raise HTTPException(422, "subject_id must be a UUID")
             where += " AND subject_id = %s"
             params.append(subject_id)
         total = conn.execute(

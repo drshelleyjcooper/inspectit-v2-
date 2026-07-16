@@ -341,3 +341,18 @@ def test_access_log_emits_json_lines(client, caplog):
     assert any(l["path"] == "/me" and l["status"] == 401 and "ms" in l
                for l in lines)
     assert not any(l["path"] == "/health" for l in lines)
+
+
+# ---------- final QC pass: garbage UUID filters must not 500 ----------
+
+def test_uuid_filters_reject_garbage_cleanly(client):
+    cid, tok = STATE["pageco"]
+    h = {"Authorization": f"Bearer {tok}"}
+    assert client.get(f"/companies/{cid}/audit?subject_id=garbage",
+                      headers=h).status_code == 422
+    assert client.get(f"/companies/{cid}/assignments?user_id=garbage",
+                      headers=h).status_code == 422
+    # valid uuid filters still work
+    import uuid as _uuid
+    assert client.get(f"/companies/{cid}/audit?subject_id={_uuid.uuid4()}",
+                      headers=h).status_code == 200

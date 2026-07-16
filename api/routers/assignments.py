@@ -1,5 +1,6 @@
 """Assignments: managers assign users to vehicles/properties/projects.
 Requires the `assign` action on the module matching the subject type."""
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -70,6 +71,11 @@ def list_assignments(subject_type: Optional[str] = None,
                      limit: int = Query(100, ge=1, le=500),
                      offset: int = Query(0, ge=0),
                      ctx: AuthContext = Depends(company_member)):
+    if user_id is not None:
+        try:
+            uuid.UUID(user_id)
+        except ValueError:
+            raise HTTPException(422, "user_id must be a UUID")
     assignable = [st for st, mod in SUBJECT_MODULE.items()
                   if ctx.grant_scope(mod, "assign")]
     if ctx.grant_scope("company", "view"):
