@@ -441,14 +441,18 @@
     </div>
 
     <h1 class="welcome">Welcome to Inspectit.app</h1>
-    <p class="sub" id="loginSubtitle">Enter your credentials to access your dashboard.</p>
+    <p class="sub" id="loginSubtitle">Sign in to your account.</p>
 
     <form id="loginForm" autocomplete="off">
-      <label class="field"><span>Username</span>
-        <input type="text" id="loginUser" autocomplete="username" placeholder="e.g. admin"></label>
+      <label class="field hidden" id="companyRow"><span>Company name</span>
+        <input type="text" id="loginCompany" autocomplete="organization" placeholder="e.g. Acme Property Group"></label>
+      <label class="field hidden" id="nameRow"><span>Your name</span>
+        <input type="text" id="loginName" autocomplete="name" placeholder="e.g. Jane Smith"></label>
+      <label class="field"><span>Email</span>
+        <input type="email" id="loginEmail" autocomplete="email" placeholder="you@company.com"></label>
       <label class="field"><span>Password</span>
         <input type="password" id="loginPass" autocomplete="current-password" placeholder="Your password"></label>
-      <label class="field" id="confirmRow"><span>Confirm password</span>
+      <label class="field hidden" id="confirmRow"><span>Confirm password</span>
         <input type="password" id="loginConfirm" autocomplete="new-password" placeholder="Re-enter password"></label>
 
       <div class="captcha-row">
@@ -467,7 +471,7 @@
 
     <p class="login-foot">
       <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.7"/></svg>
-      Prototype sign-in — your account and data are stored locally in this browser only.
+      <a href="#" id="loginModeSwitch">New here? Create a company account</a>
     </p>
   </div>
 </div>
@@ -574,7 +578,7 @@
         <!-- bottom action buttons -->
         <div class="footer-actions">
           <button class="ghost" id="btnEditProfile">Edit profile</button>
-          <button class="ghost" id="btnChangePw">Change password</button>
+          <button class="ghost hidden" id="btnChangePw">Change password</button>
           <button class="ghost" id="btnUsers">Users</button>
           <button class="ghost" id="btnExport">Export backup</button>
           <button class="ghost" id="btnImport">Import backup</button>
@@ -632,7 +636,9 @@ const setJSON = (k, v) => store.set(k, JSON.stringify(v));
    optimistic concurrency (409 -> the server copy wins and is applied locally).
    Server: ~/inspectit-backend (collections endpoints). */
 const CLOUD_KEY = "inspectit.cloud";                 // local-only (never synced)
-const CLOUD_DEFAULT_API = "http://127.0.0.1:8100";   // dev; DO URL at deploy
+const CLOUD_DEFAULT_API = (typeof location !== "undefined" && /^https?:$/.test(location.protocol))
+  ? location.origin
+  : "http://127.0.0.1:8100";   // same-origin in the browser; falls back for file:// testing
 const CLOUD_SYNC_NAMES = Object.keys(K).filter(n => n !== "account" && n !== "session" && n !== "users");
 const CLOUD_FULLKEY = {};                            // "vehicles" -> "inspectit.vehicles"
 CLOUD_SYNC_NAMES.forEach(n => { CLOUD_FULLKEY[n] = K[n]; });
@@ -897,51 +903,81 @@ function showScreen(name) {
   $("screen-app").classList.toggle("hidden", name !== "app");
 }
 
-/* ---------- login ---------- */
+/* ---------- login (real account: signup/signin hit the Inspectit API and
+   turn cloud sync on automatically — no separate "Cloud sync" step needed) */
+let loginMode = "create";   // "create" | "signin" — toggled by the link below
 function renderLogin() {
-  const acct = getAccount();
-  const creating = !acct;
+  const c = cloudCfg();
+  if (c && c.email) loginMode = "signin";
+  const creating = loginMode === "create";
   $("loginSubtitle").textContent = creating
-    ? "Set the credentials you'll use to manage your account."
-    : "Enter your credentials to access your dashboard.";
+    ? "Create your company account — your data syncs automatically."
+    : "Sign in to your account.";
+  $("companyRow").classList.toggle("hidden", !creating);
+  $("nameRow").classList.toggle("hidden", !creating);
   $("confirmRow").classList.toggle("hidden", !creating);
   $("loginSubmit").textContent = creating ? "Create account" : "Sign in";
-  $("loginUser").value = creating ? "" : (acct.username || "");
+  $("loginModeSwitch").textContent = creating
+    ? "Already have an account? Sign in"
+    : "New here? Create a company account";
+  $("loginCompany").value = "";
+  $("loginName").value = "";
+  $("loginEmail").value = (c && c.email) || "";
   $("loginPass").value = "";
   $("loginConfirm").value = "";
   $("loginError").textContent = "";
+  $("loginSubmit").disabled = false;
   newCaptcha();
   showScreen("login");
-  setTimeout(() => $("loginUser").focus(), 60);
+  setTimeout(() => $("loginEmail").focus(), 60);
 }
 
-$("loginForm").addEventListener("submit", e => {
+$("loginModeSwitch").addEventListener("click", e => {
+  e.preventDefault();
+  loginMode = loginMode === "create" ? "signin" : "create";
+  renderLogin();
+});
+
+$("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
   const err = $("loginError");
-  const acct = getAccount();
-  const creating = !acct;
-  const u = $("loginUser").value.trim();
+  err.textContent = "";
+  const creating = loginMode === "create";
+  const company = $("loginCompany").value.trim();
+  const name = $("loginName").value.trim();
+  const email = $("loginEmail").value.trim();
   const p = $("loginPass").value;
 
   if (Number($("capA").value) !== captcha.a + captcha.b) {
     err.textContent = "Security check failed — answer the sum to continue.";
     newCaptcha(); return;
   }
+  if (!email) { err.textContent = "Enter your email address."; return; }
+  if (p.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
   if (creating) {
-    if (u.length < 3) { err.textContent = "Choose a username of at least 3 characters."; return; }
-    if (p.length < 6) { err.textContent = "Choose a password of at least 6 characters."; return; }
+    if (!company) { err.textContent = "Enter your company name."; return; }
+    if (!name) { err.textContent = "Enter your name."; return; }
     if (p !== $("loginConfirm").value) { err.textContent = "Passwords don't match."; return; }
-    setJSON(K.account, { username: u, password: p });
-    if (getUsers().length === 0) setJSON(K.users, [{ name: u, role: "Administrator" }]);
-    store.set(K.session, "1");
-    enterApp();
-  } else {
-    if (u !== acct.username || p !== acct.password) {
-      err.textContent = "Incorrect username or password.";
-      newCaptcha(); return;
+  }
+
+  const btn = $("loginSubmit");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Working…";
+  try {
+    if (creating) {
+      await cloudCreateAccount(CLOUD_DEFAULT_API, company, name, email, p);
+      if (getUsers().length === 0) setJSON(K.users, [{ name: name, role: "Administrator" }]);
+    } else {
+      await cloudSignIn(CLOUD_DEFAULT_API, email, p);
     }
     store.set(K.session, "1");
     enterApp();
+  } catch (ex) {
+    err.textContent = (ex && ex.message) || "Something went wrong. Please try again.";
+    newCaptcha();
+    btn.disabled = false;
+    btn.textContent = label;
   }
 });
 $("capRefresh").addEventListener("click", newCaptcha);
@@ -5332,8 +5368,7 @@ function rmPrintAllProperties(range) {
 
 /* ---------- boot ---------- */
 (function boot() {
-  const acct = getAccount();
-  if (acct && store.get(K.session) === "1") { enterApp(); }
+  if (cloudSignedIn() && store.get(K.session) === "1") { enterApp(); }
   else { renderLogin(); }
 })();
 </script>
