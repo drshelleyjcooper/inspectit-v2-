@@ -169,6 +169,8 @@
   .topbar .spacer { flex: 1; }
   .topbar .home-btn { display: inline-flex; align-items: center; gap: 6px; }
   .topbar .home-btn svg { width: 15px; height: 15px; }
+  .nav-hamburger { display: none; }
+  .nav-backdrop { display: none; }
   /* embedded company profile strip */
   .profile-chip { display: flex; align-items: center; gap: 11px; padding: 4px 4px 4px 4px; }
   .profile-chip .avatar {
@@ -411,17 +413,110 @@
   .user-list .rm:hover { background: #fdecea; color: var(--defect); }
   .add-user-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
 
+  /* ---------- admin: users page ---------- */
+  .users-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 16px; }
+  .users-toolbar .field { min-width: 160px; }
+  .users-toolbar .search-field { flex: 1; min-width: 220px; }
+  .users-count { font-size: .82rem; color: var(--muted); margin: 0 0 10px; }
+  .users-list { list-style: none; margin: 0; padding: 0; }
+  .users-row {
+    display: flex; align-items: center; gap: 14px; padding: 13px 14px;
+    border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; background: #fafbfc;
+  }
+  .users-row .uavatar { width: 36px; height: 36px; border-radius: 9px; background: #e7eefb; color: var(--navy); display: grid; place-items: center; font-weight: 700; font-size: .82rem; flex: none; }
+  .users-row .uinfo { min-width: 0; flex: 1 1 200px; }
+  .users-row .un { font-weight: 600; }
+  .users-row .ue { font-size: .78rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .users-row .uroles { display: flex; flex-wrap: wrap; gap: 5px; flex: 1 1 160px; }
+  .role-badge {
+    display: inline-block; font-size: .72rem; font-weight: 600; padding: 3px 9px;
+    border-radius: 999px; background: #eef1f5; color: var(--navy-deep); white-space: nowrap;
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; font-weight: 700;
+    padding: 4px 10px; border-radius: 999px; text-transform: uppercase; letter-spacing: .02em; flex: none;
+  }
+  .status-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .status-pill--active { background: #e8f5e9; color: var(--ok); }
+  .status-pill--suspended { background: #fdecea; color: var(--defect); }
+  .users-row .umeta { font-size: .74rem; color: var(--muted); flex: 0 0 130px; text-align: right; line-height: 1.5; }
+  .users-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 8px; padding: 48px 20px; color: var(--muted); text-align: center;
+  }
+  .users-state.is-error { color: var(--defect); }
+  .users-pager { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 14px; font-size: .84rem; color: var(--muted); }
+  .users-row { cursor: pointer; }
+  .users-row:hover { border-color: var(--brand); }
+  @media (max-width: 720px) {
+    .users-row { flex-wrap: wrap; }
+    .users-row .umeta { text-align: left; flex-basis: 100%; }
+  }
+
+  /* ---------- admin: member detail modal ---------- */
+  .modal.wide { max-width: 640px; }
+  .modal.wide .body { max-height: 68vh; overflow-y: auto; }
+  .md-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .md-head .uavatar.lg { width: 48px; height: 48px; border-radius: 11px; font-size: 1.05rem; }
+  .md-head .md-name { font-weight: 700; font-size: 1.05rem; }
+  .md-head .md-email { font-size: .85rem; color: var(--muted); }
+  .md-head .status-pill { margin-left: auto; }
+  .md-suspend-note {
+    background: #fdecea; color: var(--defect); border: 1px solid #f6c6c1;
+    border-radius: 9px; padding: 10px 13px; font-size: .85rem; margin-bottom: 16px;
+  }
+  .md-section { margin-bottom: 20px; }
+  .md-section h4 { margin: 0 0 10px; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .md-roles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 14px; }
+  .md-role-check { display: flex; align-items: center; gap: 8px; font-size: .9rem; cursor: pointer; }
+  .md-role-check input { width: auto; }
+  .md-perm-diff { margin-top: 12px; padding: 10px 13px; background: #eef2f8; border-radius: 9px; font-size: .84rem; line-height: 1.6; }
+  .md-permlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .md-permlist li { font-size: .86rem; }
+  .md-permlist b { text-transform: capitalize; }
+  .md-sessions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .md-session {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border: 1px solid var(--border); border-radius: 9px; padding: 9px 12px; font-size: .84rem; background: #fafbfc;
+  }
+  .md-session.is-active { border-left: 3px solid var(--ok); }
+  .md-session.is-dead { opacity: .6; }
+  .md-session .ms-main { display: flex; flex-direction: column; gap: 2px; }
+  .md-session .ms-device { font-weight: 600; }
+  .md-session .ms-ip { color: var(--muted); font-size: .8rem; }
+  .md-session .ms-meta { color: var(--muted); font-size: .78rem; text-align: right; }
+  .muted-note { color: var(--muted); font-size: .86rem; margin: 0; }
+
   /* ---------- responsive ---------- */
   @media (max-width: 820px) {
     .app-shell { grid-template-columns: 1fr; }
-    .sidebar {
-      flex-direction: row; align-items: center; gap: 14px;
-      padding: 12px 16px; overflow-x: auto;
+
+    /* Off-canvas drawer instead of a horizontally-scrolling nav strip —
+       the sidebar keeps its normal vertical layout (same as desktop) and
+       just slides in/out; nothing to horizontally scroll to find a tab. */
+    .nav-hamburger {
+      display: flex; flex-direction: column; justify-content: center; gap: 5px;
+      width: 38px; height: 38px; padding: 8px; margin: -8px 2px -8px -8px;
+      border: none; background: none; cursor: pointer; flex: none;
     }
-    .sidebar .side-foot { display: none; }
-    .nav { flex-direction: row; gap: 4px; }
-    .nav .nav-label { display: none; }
-    .nav a { padding: 9px 13px; white-space: nowrap; }
+    .nav-hamburger span { display: block; width: 20px; height: 2px; background: var(--ink); border-radius: 2px; transition: transform .25s, opacity .2s; }
+    .nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+    .nav-hamburger.open span:nth-child(2) { opacity: 0; }
+    .nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+    .sidebar {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 268px; max-width: 82vw;
+      z-index: 200; transform: translateX(-100%); transition: transform .25s ease;
+      box-shadow: 3px 0 28px rgba(0,0,0,.28); overflow-y: auto;
+    }
+    body.nav-open .sidebar { transform: translateX(0); }
+
+    .nav-backdrop {
+      display: block; position: fixed; inset: 0; background: rgba(11,33,56,.45);
+      z-index: 190; opacity: 0; pointer-events: none; transition: opacity .2s;
+    }
+    body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
+
     .topbar { padding: 12px 16px; }
     .content { padding: 22px 16px 50px; }
     .profile-chip .pc-name, .profile-chip .pc-meta { max-width: 130px; }
@@ -499,6 +594,9 @@
       <a data-nav="projects">
         <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 4v3M16 4v3M4 10h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         Projects</a>
+      <a data-nav="users" id="navUsersLink" class="hidden">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3.2" stroke="currentColor" stroke-width="1.7"/><path d="M3.3 19c.8-3.3 3-5.2 5.7-5.2s4.9 1.9 5.7 5.2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="17.3" cy="9" r="2.3" stroke="currentColor" stroke-width="1.7"/><path d="M15.6 13.2c2 .3 3.5 1.8 4.1 4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        Users</a>
     </nav>
 
     <div class="side-foot">Inspectit.app · v0.21</div>
@@ -507,6 +605,9 @@
   <!-- main -->
   <div class="main">
     <header class="topbar">
+      <button class="nav-hamburger" id="navHamburger" aria-label="Open menu" aria-expanded="false" aria-controls="nav">
+        <span></span><span></span><span></span>
+      </button>
       <h2 class="page-title" id="pageTitle">Home</h2>
       <button class="ghost home-btn hidden" id="returnHome">
         <svg viewBox="0 0 24 24" fill="none"><path d="M3 11l9-7 9 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9h14v-9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
@@ -514,6 +615,7 @@
       <div class="spacer"></div>
       <div class="profile-chip" id="profileChip"></div>
     </header>
+    <div class="nav-backdrop" id="navBackdrop"></div>
 
     <div class="content">
 
@@ -603,6 +705,11 @@
       <!-- PROJECTS -->
       <section class="view" id="view-projects">
         <div id="projectsRoot"></div>
+      </section>
+
+      <!-- USERS (admin) -->
+      <section class="view" id="view-users">
+        <div id="usersRoot"></div>
       </section>
 
     </div><!-- /content -->
@@ -880,6 +987,510 @@ window.addEventListener("online", () => {
 });
 /* ==================== /CLOUD SYNC ==================== */
 
+/* ==================== ADMIN: USERS & ROLES (Stage 3) ====================
+   One module owns every fetch for this surface. Built on cloudFetch (Bearer
+   auth, 401 -> refresh-once-then-retry already handled there); this layer
+   finishes the "else logout" half of that contract and turns this API's
+   specific error shapes (structured 403/409 codes, 429+Retry-After) into a
+   plain { ok, kind, message, ... } result the UI can switch on without ever
+   touching a raw Response. Contract: docs/admin-users-api.md. */
+const adminApi = {
+  async request(path, opts) {
+    let r;
+    try {
+      r = await cloudFetch(path, opts);
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      if (msg === "cloud session expired" || msg === "not signed in") {
+        cloudSignOut(); store.remove(K.session); renderLogin();
+        return { ok: false, kind: "signed_out",
+                 message: "Your session expired — please sign in again." };
+      }
+      return { ok: false, kind: "network",
+               message: msg || "Couldn't reach the server." };
+    }
+    if (r.status === 429) {
+      return { ok: false, kind: "rate_limited",
+               retryAfter: r.headers.get("Retry-After"),
+               message: "Too many requests — please wait a moment and try again." };
+    }
+    let body = null;
+    try { body = await r.json(); } catch (_) {}
+    const detailMsg = () => {
+      const d = body && body.detail;
+      if (d && typeof d === "object") return d.message || JSON.stringify(d);
+      return d || null;
+    };
+    if (r.ok) {
+      const total = r.headers.get("X-Total-Count");
+      return { ok: true, data: body, total: total != null ? Number(total) : null };
+    }
+    if (r.status === 403) {
+      const code = body && body.detail && body.detail.code;
+      if (code === "account_suspended") {
+        return { ok: false, kind: "account_suspended",
+                 message: detailMsg() || "Your account has been suspended." };
+      }
+      return { ok: false, kind: "not_permitted",
+               message: detailMsg() || "You don't have permission to do this." };
+    }
+    if (r.status === 409) {
+      const code = (body && body.detail && body.detail.code) || "conflict";
+      return { ok: false, kind: "guard", code,
+               message: detailMsg() || "That action can't be completed right now." };
+    }
+    if (r.status === 404) {
+      return { ok: false, kind: "not_found", message: detailMsg() || "Not found." };
+    }
+    if (r.status === 422) {
+      return { ok: false, kind: "invalid", message: detailMsg() || "Invalid request." };
+    }
+    return { ok: false, kind: "error",
+             message: detailMsg() || ("Request failed (" + r.status + ")") };
+  },
+  get(path) { return this.request(path); },
+  post(path, body) { return this.request(path, { method: "POST", body }); },
+  patch(path, body) { return this.request(path, { method: "PATCH", body }); },
+};
+
+let cloudUserPerms = {};   // this company's resolved permissions, {module: [actions]}
+let cloudUserId = null;    // the signed-in user's own id, for self-action guards client-side
+
+async function refreshUserPermsAndNav() {
+  const navLink = $("navUsersLink");
+  if (!cloudSignedIn()) { navLink.classList.add("hidden"); return; }
+  const res = await adminApi.get("/me");
+  if (!res.ok) { navLink.classList.add("hidden"); return; }
+  cloudUserId = res.data.id;
+  const c = cloudCfg();
+  const mem = (res.data.memberships || []).find(m => m.company_id === c.company);
+  cloudUserPerms = (mem && mem.permissions) || {};
+  const canSeeUsers = (cloudUserPerms.company || []).some(a => a === "view" || a === "assign");
+  navLink.classList.toggle("hidden", !canSeeUsers);
+}
+
+/* ---------- users: list view ---------- */
+let usersFilter = { status: "", role: "", q: "", offset: 0 };
+const USERS_PAGE_SIZE = 50;
+let usersRoleOptions = null;   // [{id,name}] cache for the role filter <select>
+
+function usersInitials(s) {
+  return (String(s || "").trim().split(/\s+/).map(w => w[0]).slice(0, 2).join("") || "—").toUpperCase();
+}
+
+function usersStateHTML(kind, message) {
+  const icon = kind === "error"
+    ? `<svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`
+    : kind === "empty"
+    ? `<svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M3.5 19c.8-3.2 3-5 5.5-5s4.7 1.8 5.5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`
+    : `<svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" stroke-dasharray="14 8"/></svg>`;
+  return `<div class="users-state${kind === "error" ? " is-error" : ""}">${icon}<div>${esc(message)}</div></div>`;
+}
+
+async function usersLoadRoleOptions() {
+  if (usersRoleOptions) return usersRoleOptions;
+  const c = cloudCfg();
+  const res = await adminApi.get(`/companies/${c.company}/roles`);
+  usersRoleOptions = res.ok ? res.data : [];
+  return usersRoleOptions;
+}
+
+async function renderUsersList() {
+  const root = $("usersRoot");
+  if (!cloudSignedIn()) {
+    root.innerHTML = usersStateHTML("error", "Sign in with a company account to manage users.");
+    return;
+  }
+  root.innerHTML = `
+    <div class="page-head"><h1>Users</h1><p>Manage who has access to this company and what they can do.</p></div>
+    <div class="users-toolbar">
+      <label class="field search-field"><span>Search</span>
+        <input type="text" id="usersSearch" placeholder="Name or email"></label>
+      <label class="field"><span>Status</span>
+        <select id="usersStatusFilter">
+          <option value="">All</option>
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+        </select></label>
+      <label class="field"><span>Role</span>
+        <select id="usersRoleFilter"><option value="">All roles</option></select></label>
+    </div>
+    <p class="users-count" id="usersCount"></p>
+    <div id="usersListMount">${usersStateHTML("loading", "Loading users…")}</div>
+    <div class="users-pager hidden" id="usersPager"></div>`;
+
+  $("usersSearch").value = usersFilter.q;
+  $("usersStatusFilter").value = usersFilter.status;
+  $("usersSearch").addEventListener("input", () => {
+    clearTimeout(usersFilter._t);
+    usersFilter._t = setTimeout(() => {
+      usersFilter.q = $("usersSearch").value.trim();
+      usersFilter.offset = 0;
+      usersFetchAndRender();
+    }, 300);
+  });
+  $("usersStatusFilter").addEventListener("change", () => {
+    usersFilter.status = $("usersStatusFilter").value;
+    usersFilter.offset = 0;
+    usersFetchAndRender();
+  });
+  $("usersRoleFilter").addEventListener("change", () => {
+    usersFilter.role = $("usersRoleFilter").value;
+    usersFilter.offset = 0;
+    usersFetchAndRender();
+  });
+
+  const roles = await usersLoadRoleOptions();
+  const roleSel = $("usersRoleFilter");
+  if (roleSel) {
+    roleSel.innerHTML = `<option value="">All roles</option>` +
+      roles.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join("");
+    roleSel.value = usersFilter.role;
+  }
+
+  usersFetchAndRender();
+}
+
+async function usersFetchAndRender() {
+  const mount = $("usersListMount");
+  const pager = $("usersPager");
+  if (!mount) return;   // user navigated away while a debounced fetch was pending
+  mount.innerHTML = usersStateHTML("loading", "Loading users…");
+  pager.classList.add("hidden");
+
+  const c = cloudCfg();
+  const params = new URLSearchParams({
+    limit: String(USERS_PAGE_SIZE), offset: String(usersFilter.offset) });
+  if (usersFilter.status) params.set("status", usersFilter.status);
+  if (usersFilter.role) params.set("role", usersFilter.role);
+  if (usersFilter.q) params.set("q", usersFilter.q);
+
+  const res = await adminApi.get(`/companies/${c.company}/members?${params}`);
+  if (!$("usersListMount")) return;   // view changed while awaiting
+
+  if (!res.ok) {
+    if (res.kind === "signed_out") return;   // renderLogin() already fired
+    $("usersCount").textContent = "";
+    mount.innerHTML = usersStateHTML("error", res.message);
+    return;
+  }
+
+  const rows = res.data;
+  const total = res.total != null ? res.total : rows.length;
+  if (!rows.length) {
+    $("usersCount").textContent = "";
+    mount.innerHTML = usersStateHTML("empty",
+      usersFilter.q || usersFilter.status || usersFilter.role
+        ? "No users match these filters."
+        : "No users yet — invite your first teammate from the Invitations panel.");
+    return;
+  }
+
+  $("usersCount").textContent = total === 1 ? "1 user" : `${total} users`;
+  mount.innerHTML = `<ul class="users-list">` + rows.map(u => `
+    <li class="users-row" data-uid="${u.user_id}" tabindex="0" role="button"
+        aria-label="View details for ${esc(u.name)}">
+      <div class="uavatar">${esc(usersInitials(u.name))}</div>
+      <div class="uinfo">
+        <div class="un">${esc(u.name)}</div>
+        <div class="ue">${esc(u.email)}</div>
+      </div>
+      <div class="uroles">${
+        u.roles.length
+          ? u.roles.map(r => `<span class="role-badge">${esc(r.name)}</span>`).join("")
+          : `<span class="role-badge">No roles</span>`
+      }</div>
+      <span class="status-pill status-pill--${u.status}">${esc(u.status)}</span>
+      <div class="umeta">
+        Joined ${u.joined_at ? new Date(u.joined_at).toLocaleDateString() : "—"}<br>
+        Last login ${u.last_login ? new Date(u.last_login).toLocaleDateString() : "never"}
+      </div>
+    </li>`).join("") + `</ul>`;
+  mount.querySelectorAll(".users-row").forEach(row => {
+    row.addEventListener("click", () => openMemberDetail(row.dataset.uid));
+    row.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openMemberDetail(row.dataset.uid); }
+    });
+  });
+
+  if (total > USERS_PAGE_SIZE) {
+    const page = Math.floor(usersFilter.offset / USERS_PAGE_SIZE) + 1;
+    const pages = Math.ceil(total / USERS_PAGE_SIZE);
+    pager.classList.remove("hidden");
+    pager.innerHTML = `
+      <button class="ghost" id="usersPrev"${usersFilter.offset === 0 ? " disabled" : ""}>← Previous</button>
+      <span>Page ${page} of ${pages}</span>
+      <button class="ghost" id="usersNext"${page >= pages ? " disabled" : ""}>Next →</button>`;
+    $("usersPrev").addEventListener("click", () => {
+      usersFilter.offset = Math.max(0, usersFilter.offset - USERS_PAGE_SIZE);
+      usersFetchAndRender();
+    });
+    $("usersNext").addEventListener("click", () => {
+      usersFilter.offset += USERS_PAGE_SIZE;
+      usersFetchAndRender();
+    });
+  }
+}
+
+/* ---------- users: detail modal ---------- */
+function usersFormatUserAgent(ua) {
+  if (!ua) return "Unknown device";
+  if (/iPad/.test(ua)) return "iPad";
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/Android/.test(ua)) return "Android";
+  if (/Macintosh/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows";
+  if (/Linux/.test(ua)) return "Linux";
+  return "Other device";
+}
+
+function usersUnionPerms(roleIds, allRoles) {
+  const byId = new Map(allRoles.map(r => [r.id, r]));
+  const acc = {};
+  roleIds.forEach(id => {
+    const r = byId.get(id);
+    if (!r) return;
+    Object.entries(r.permissions).forEach(([mod, actions]) => {
+      acc[mod] = acc[mod] || new Set();
+      actions.forEach(a => acc[mod].add(a));
+    });
+  });
+  const out = {};
+  Object.entries(acc).forEach(([mod, set]) => { out[mod] = Array.from(set).sort(); });
+  return out;
+}
+
+function usersPermMatrixHTML(perms) {
+  const mods = Object.keys(perms).sort();
+  if (!mods.length) return `<p class="muted-note">No permissions granted.</p>`;
+  return `<ul class="md-permlist">` + mods.map(mod => `
+    <li><b>${esc(mod.replace(/_/g, " "))}</b>: ${
+      perms[mod].map(a => `<span class="role-badge">${esc(a)}</span>`).join(" ")
+    }</li>`).join("") + `</ul>`;
+}
+
+function usersSessionsHTML(sessions) {
+  if (!sessions.length) return `<p class="muted-note">No sessions recorded.</p>`;
+  return `<ul class="md-sessions">` + sessions.map(s => `
+    <li class="md-session ${s.active ? "is-active" : "is-dead"}">
+      <div class="ms-main">
+        <span class="ms-device">${esc(usersFormatUserAgent(s.user_agent))}</span>
+        <span class="ms-ip">${esc(s.ip || "Unknown IP")}</span>
+      </div>
+      <div class="ms-meta">
+        ${s.active ? "Active" : (s.revoked_at ? "Revoked" : "Expired")}<br>
+        Last seen ${s.last_seen_at ? new Date(s.last_seen_at).toLocaleString() : "—"}
+      </div>
+    </li>`).join("") + `</ul>`;
+}
+
+async function openMemberDetail(userId) {
+  const close = openModal("Member details", usersStateHTML("loading", "Loading…"), "");
+  $("modalMount").querySelector(".modal").classList.add("wide");
+  let current = null;   // last-loaded member record, so Cancel can re-render without a refetch
+
+  async function load() {
+    const mount = $("modalMount");
+    if (!mount.querySelector(".modal")) return;   // closed while a prior action was in flight
+    const c = cloudCfg();
+    const [detailRes, roles] = await Promise.all([
+      adminApi.get(`/companies/${c.company}/members/${userId}`),
+      usersLoadRoleOptions(),
+    ]);
+    if (!mount.querySelector(".modal")) return;
+    if (!detailRes.ok) {
+      if (detailRes.kind === "signed_out") { close(); return; }
+      mount.querySelector(".body").innerHTML = usersStateHTML("error", detailRes.message);
+      mount.querySelector(".foot").innerHTML = `<button class="ghost" id="mdCloseErr">Close</button>`;
+      $("mdCloseErr").addEventListener("click", close);
+      return;
+    }
+    current = detailRes.data;
+    render(current, roles);
+  }
+
+  function render(m, allRoles) {
+    const mount = $("modalMount");
+    const heldIds = m.roles.map(r => r.id);
+    const isSelf = m.user_id === cloudUserId;
+
+    mount.querySelector(".body").innerHTML = `
+      <div class="md-head">
+        <div class="uavatar lg">${esc(usersInitials(m.name))}</div>
+        <div>
+          <div class="md-name">${esc(m.name)}</div>
+          <div class="md-email">${esc(m.email)}</div>
+        </div>
+        <span class="status-pill status-pill--${m.status}">${esc(m.status)}</span>
+      </div>
+      ${m.status === "suspended" ? `
+      <div class="md-suspend-note">
+        Suspended ${m.suspended_at ? new Date(m.suspended_at).toLocaleString() : ""}${
+          m.suspend_reason ? " — " + esc(m.suspend_reason) : ""}
+      </div>` : ""}
+
+      <div class="md-section">
+        <h4>Roles</h4>
+        <div class="md-roles-grid">${allRoles.map(r => `
+          <label class="md-role-check">
+            <input type="checkbox" data-role-id="${r.id}" ${heldIds.includes(r.id) ? "checked" : ""}>
+            ${esc(r.name)}</label>`).join("")}
+        </div>
+        <div class="md-perm-diff hidden" id="mdPermDiff"></div>
+        <p class="form-error" id="mdRolesErr" role="alert"></p>
+        <button class="primary hidden" id="mdSaveRoles" style="margin-top:12px;">Save role changes</button>
+      </div>
+
+      <div class="md-section">
+        <h4>Current permissions</h4>
+        ${usersPermMatrixHTML(m.permissions)}
+      </div>
+
+      <div class="md-section">
+        <h4>Sessions</h4>
+        ${usersSessionsHTML(m.sessions)}
+      </div>`;
+
+    const footBtns = [`<button class="ghost" id="mdClose">Close</button>`];
+    footBtns.push(`<button class="ghost" id="mdForceLogout">Force logout</button>`);
+    if (m.status === "active") {
+      footBtns.push(isSelf
+        ? `<button class="danger" id="mdSuspend" disabled title="You can't suspend your own account">Suspend</button>`
+        : `<button class="danger" id="mdSuspend">Suspend</button>`);
+    } else {
+      footBtns.push(`<button class="primary" id="mdReactivate">Reactivate</button>`);
+    }
+    mount.querySelector(".foot").innerHTML = footBtns.join("");
+
+    $("mdClose").addEventListener("click", close);
+
+    const heldSorted = heldIds.slice().sort().join(",");
+    function checkedIds() {
+      return Array.from(mount.querySelectorAll("[data-role-id]:checked")).map(cb => cb.dataset.roleId);
+    }
+    function updateDiff() {
+      const afterIds = checkedIds();
+      const changed = afterIds.slice().sort().join(",") !== heldSorted;
+      $("mdSaveRoles").classList.toggle("hidden", !changed);
+      const diffEl = $("mdPermDiff");
+      if (!changed) { diffEl.classList.add("hidden"); return; }
+      const before = usersUnionPerms(heldIds, allRoles);
+      const after = usersUnionPerms(afterIds, allRoles);
+      const mods = Array.from(new Set([...Object.keys(before), ...Object.keys(after)])).sort();
+      const lines = [];
+      mods.forEach(mod => {
+        const b = new Set(before[mod] || []), a = new Set(after[mod] || []);
+        const added = [...a].filter(x => !b.has(x));
+        const removed = [...b].filter(x => !a.has(x));
+        if (added.length || removed.length) {
+          lines.push(`<b>${esc(mod.replace(/_/g, " "))}</b>: ` +
+            (added.length ? `<span style="color:var(--ok)">+${added.join(", ")}</span> ` : "") +
+            (removed.length ? `<span style="color:var(--defect)">−${removed.join(", ")}</span>` : ""));
+        }
+      });
+      diffEl.innerHTML = lines.length ? lines.join("<br>") : "No permission change.";
+      diffEl.classList.remove("hidden");
+    }
+    mount.querySelectorAll("[data-role-id]").forEach(cb => cb.addEventListener("change", updateDiff));
+
+    $("mdSaveRoles").addEventListener("click", async () => {
+      const afterIds = checkedIds();
+      const add = afterIds.filter(id => !heldIds.includes(id));
+      const remove = heldIds.filter(id => !afterIds.includes(id));
+      const btn = $("mdSaveRoles");
+      btn.disabled = true; const label = btn.textContent; btn.textContent = "Saving…";
+      const c = cloudCfg();
+      const res = await adminApi.patch(`/companies/${c.company}/members/${userId}/roles`, { add, remove });
+      if (!mount.querySelector(".modal")) return;
+      if (!res.ok) {
+        if (res.kind === "signed_out") { close(); return; }
+        $("mdRolesErr").textContent = res.message;
+        btn.disabled = false; btn.textContent = label;
+        return;
+      }
+      toast("Roles updated");
+      usersFetchAndRender();
+      load();
+    });
+
+    $("mdForceLogout").addEventListener("click", async () => {
+      if (!confirm(`Sign "${m.name}" out of every device? They'll need to log in again.`)) return;
+      const btn = $("mdForceLogout"); btn.disabled = true;
+      const c = cloudCfg();
+      const res = await adminApi.post(`/companies/${c.company}/members/${userId}/revoke-sessions`, {});
+      if (!mount.querySelector(".modal")) return;
+      if (!res.ok) {
+        if (res.kind === "signed_out") { close(); return; }
+        toast(res.message);
+        btn.disabled = false;
+        return;
+      }
+      toast("Sessions revoked");
+      load();
+    });
+
+    const suspendBtn = $("mdSuspend");
+    if (suspendBtn && !isSelf) {
+      suspendBtn.addEventListener("click", () => {
+        mount.querySelector(".foot").innerHTML = `
+          <div style="width:100%;">
+            <label class="field"><span>Reason (required)</span>
+              <input type="text" id="mdSuspendReason" placeholder="e.g. Left the company"></label>
+            <p class="form-error" id="mdSuspendErr" role="alert"></p>
+            <p class="muted-note" style="margin:8px 0 0;">This signs them out of all devices
+              immediately. They keep their data and can be reactivated any time.</p>
+            <div style="display:flex; gap:10px; margin-top:12px;">
+              <button class="ghost" id="mdSuspendCancel">Cancel</button>
+              <button class="danger" id="mdSuspendConfirm">Confirm suspend</button>
+            </div>
+          </div>`;
+        $("mdSuspendCancel").addEventListener("click", () => render(current, allRoles));
+        setTimeout(() => { const f = $("mdSuspendReason"); if (f) f.focus(); }, 30);
+        $("mdSuspendConfirm").addEventListener("click", async () => {
+          const reason = $("mdSuspendReason").value.trim();
+          if (!reason) { $("mdSuspendErr").textContent = "A reason is required."; return; }
+          const btn = $("mdSuspendConfirm");
+          btn.disabled = true; btn.textContent = "Suspending…";
+          const c = cloudCfg();
+          const res = await adminApi.post(`/companies/${c.company}/members/${userId}/suspend`, { reason });
+          if (!mount.querySelector(".modal")) return;
+          if (!res.ok) {
+            if (res.kind === "signed_out") { close(); return; }
+            $("mdSuspendErr").textContent = res.message;
+            btn.disabled = false; btn.textContent = "Confirm suspend";
+            return;
+          }
+          toast("Member suspended");
+          usersFetchAndRender();
+          load();
+        });
+      });
+    }
+
+    const reactivateBtn = $("mdReactivate");
+    if (reactivateBtn) {
+      reactivateBtn.addEventListener("click", async () => {
+        const btn = reactivateBtn; btn.disabled = true; btn.textContent = "Reactivating…";
+        const c = cloudCfg();
+        const res = await adminApi.post(`/companies/${c.company}/members/${userId}/reactivate`, {});
+        if (!mount.querySelector(".modal")) return;
+        if (!res.ok) {
+          if (res.kind === "signed_out") { close(); return; }
+          toast(res.message); btn.disabled = false; btn.textContent = "Reactivate";
+          return;
+        }
+        toast("Member reactivated");
+        usersFetchAndRender();
+        load();
+      });
+    }
+  }
+
+  load();
+  return close;
+}
+/* ==================== /ADMIN: USERS & ROLES ==================== */
+
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const initials = s => (String(s || "").trim().split(/\s+/).map(w => w[0]).slice(0, 2).join("") || "—").toUpperCase();
@@ -967,7 +1578,6 @@ $("loginForm").addEventListener("submit", async e => {
   try {
     if (creating) {
       await cloudCreateAccount(CLOUD_DEFAULT_API, company, name, email, p);
-      if (getUsers().length === 0) setJSON(K.users, [{ name: name, role: "Administrator" }]);
     } else {
       await cloudSignIn(CLOUD_DEFAULT_API, email, p);
     }
@@ -988,10 +1598,11 @@ function enterApp() {
   renderProfileChip();
   navigate("home");
   cloudOnEnter();   // pull cloud changes / push pending (no-op when signed out)
+  refreshUserPermsAndNav();   // reveal "Users" nav only once role is resolved
 }
 
 /* ---------- navigation ---------- */
-const TITLES = { home: "Home", vehicles: "Vehicles", properties: "Properties", projects: "Projects" };
+const TITLES = { home: "Home", vehicles: "Vehicles", properties: "Properties", projects: "Projects", users: "Users" };
 function navigate(view) {
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   $("view-" + view).classList.add("active");
@@ -1002,12 +1613,31 @@ function navigate(view) {
   if (view === "vehicles") vehReset();
   if (view === "properties") propReset();
   if (view === "projects") projReset();
+  if (view === "users") renderUsersList();
   $("screen-app").querySelector(".content").scrollTop = 0;
   window.scrollTo(0, 0);
 }
 document.querySelectorAll("[data-nav]").forEach(el =>
-  el.addEventListener("click", () => navigate(el.dataset.nav)));
+  el.addEventListener("click", () => { navigate(el.dataset.nav); closeNavDrawer(); }));
 $("returnHome").addEventListener("click", () => navigate("home"));
+
+/* ---------- mobile nav drawer ---------- */
+function openNavDrawer() {
+  document.body.classList.add("nav-open");
+  $("navHamburger").classList.add("open");
+  $("navHamburger").setAttribute("aria-expanded", "true");
+}
+function closeNavDrawer() {
+  document.body.classList.remove("nav-open");
+  $("navHamburger").classList.remove("open");
+  $("navHamburger").setAttribute("aria-expanded", "false");
+}
+$("navHamburger").addEventListener("click", () =>
+  document.body.classList.contains("nav-open") ? closeNavDrawer() : openNavDrawer());
+$("navBackdrop").addEventListener("click", closeNavDrawer);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeNavDrawer();
+});
 
 /* ---------- embedded company profile chip (all pages) ---------- */
 function renderProfileChip() {
@@ -1344,50 +1974,9 @@ $("btnCloud").addEventListener("click", () => {
 });
 
 /* ---------- users ---------- */
-$("btnUsers").addEventListener("click", () => {
-  const close = openModal("Approved users",
-    `<ul class="user-list" id="userList"></ul>
-     <div class="add-user-row">
-       <label class="field"><span>Name</span><input type="text" id="newUserName" placeholder="Full name"></label>
-       <label class="field"><span>Role</span><input type="text" id="newUserRole" placeholder="e.g. Inspector"></label>
-       <button class="primary" id="addUserBtn" style="height:42px;">Add</button>
-     </div>
-     <p class="form-error" id="userErr" role="alert"></p>`,
-    `<button class="ghost" id="usersDone">Done</button>`);
-  $("usersDone").addEventListener("click", close);
-
-  function renderUsers() {
-    const users = getUsers();
-    $("userList").innerHTML = users.length
-      ? users.map((u, i) => `
-          <li>
-            <div class="uavatar">${esc(initials(u.name))}</div>
-            <div class="uinfo"><div class="un">${esc(u.name)}</div><div class="ur">${esc(u.role || "User")}</div></div>
-            <button class="rm" data-i="${i}" title="Remove user" aria-label="Remove ${esc(u.name)}">✕</button>
-          </li>`).join("")
-      : `<li style="justify-content:center;color:var(--muted);">No approved users yet.</li>`;
-    $("userList").querySelectorAll(".rm").forEach(btn =>
-      btn.addEventListener("click", () => {
-        const i = Number(btn.dataset.i);
-        const list = getUsers();
-        if (confirm(`Remove "${list[i].name}" from approved users?`)) {
-          list.splice(i, 1); setJSON(K.users, list); renderUsers();
-        }
-      }));
-  }
-  $("addUserBtn").addEventListener("click", () => {
-    const name = $("newUserName").value.trim();
-    const role = $("newUserRole").value.trim() || "User";
-    const err = $("userErr");
-    if (!name) { err.textContent = "Enter a name to add a user."; return; }
-    err.textContent = "";
-    const list = getUsers(); list.push({ name, role }); setJSON(K.users, list);
-    $("newUserName").value = ""; $("newUserRole").value = "";
-    renderUsers(); $("newUserName").focus();
-  });
-  renderUsers();
-  setTimeout(() => $("newUserName").focus(), 50);
-});
+// Superseded by the real admin Users page (server-backed roles/suspend/
+// sessions, not a local name+role list) — see navUsersLink / renderUsersList.
+$("btnUsers").addEventListener("click", () => navigate("users"));
 
 /* ====================== VEHICLES ====================== */
 const getVehicles = () => getJSON(K.vehicles, []);

@@ -164,10 +164,7 @@ def reset(body: ResetIn):
         conn.execute("UPDATE users SET password_hash = %s WHERE id = %s",
                      (security.hash_password(body.password), row["user_id"]))
         # Force re-login everywhere after a password change.
-        conn.execute(
-            """UPDATE refresh_tokens SET revoked_at = now()
-               WHERE user_id = %s AND revoked_at IS NULL""",
-            (row["user_id"],))
+        security.revoke_all_refresh_tokens(conn, row["user_id"])
     return {"ok": True}
 
 

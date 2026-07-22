@@ -42,12 +42,20 @@ def make_access_token(user_id: str) -> str:
     return jwt.encode(payload, config.JWT_SECRET, algorithm="HS256")
 
 
+def _request_meta() -> dict:
+    from .requestmeta import request_meta
+    return request_meta.get() or {}
+
+
 def make_refresh_token(conn, user_id: str) -> str:
     jti = uuid.uuid4()
     expires = _now() + dt.timedelta(days=config.REFRESH_TOKEN_TTL_DAYS)
+    meta = _request_meta()
     conn.execute(
-        "INSERT INTO refresh_tokens (jti, user_id, expires_at) VALUES (%s, %s, %s)",
-        (jti, user_id, expires),
+        """INSERT INTO refresh_tokens (jti, user_id, expires_at, ip, user_agent,
+                                       last_seen_at)
+           VALUES (%s, %s, %s, %s, %s, now())""",
+        (jti, user_id, expires, meta.get("ip"), meta.get("user_agent")),
     )
     payload = {"sub": str(user_id), "typ": "refresh", "jti": str(jti),
                "exp": expires, "iat": _now()}
@@ -67,7 +75,7 @@ def rotate_refresh_token(conn, token: str) -> tuple:
     Returns (access, refresh) or raises ValueError."""
     payload = decode_token(token, "refresh")
     row = conn.execute(
-        """UPDATE refresh_tokens SET revoked_at = now()
+        """UPDATE refresh_tokens SET revoked_at = now(), last_seen_at = now()
            WHERE jti = %s AND revoked_at IS NULL AND expires_at > now()
            RETURNING user_id""",
         (payload["jti"],),
@@ -76,6 +84,19 @@ def rotate_refresh_token(conn, token: str) -> tuple:
         raise ValueError("refresh token unknown, expired, or already used")
     user_id = row["user_id"]
     return make_access_token(user_id), make_refresh_token(conn, user_id)
+
+
+def revoke_all_refresh_tokens(conn, user_id) -> int:
+    """Kill every live refresh token for a user in one statement. Used by
+    password reset and account suspension — anything that must force the
+    user to re-authenticate everywhere, immediately. Returns count revoked."""
+    rows = conn.execute(
+        """UPDATE refresh_tokens SET revoked_at = now()
+           WHERE user_id = %s AND revoked_at IS NULL
+           RETURNING jti""",
+        (user_id,),
+    ).fetchall()
+    return len(rows)
 
 
 # ---------- password reset / invitations ----------

@@ -95,6 +95,59 @@ def cleanup_user_tokens(conn, user_id):
         (user_id,))
 
 
+def suspend_membership(conn, membership_id, suspended_by, reason) -> dict:
+    """Suspend a membership: status flip + revoke every refresh token for the
+    user, as one transaction (share the caller's open `conn` — do not open a
+    new connection here). Idempotent: suspending an already-suspended
+    membership is a no-op that still returns the current row, so a UI
+    double-click or retry doesn't 409.
+
+    Returns None if the membership doesn't exist (soft-deleted or bad id)."""
+    row = conn.execute(
+        """SELECT id, user_id, status FROM memberships
+           WHERE id = %s AND deleted_at IS NULL""",
+        (membership_id,),
+    ).fetchone()
+    if not row:
+        return None
+    if row["status"] == "suspended":
+        return row
+    conn.execute(
+        """UPDATE memberships
+           SET status = 'suspended', suspended_at = now(),
+               suspended_by = %s, suspend_reason = %s
+           WHERE id = %s""",
+        (suspended_by, reason, membership_id),
+    )
+    from .security import revoke_all_refresh_tokens
+    revoke_all_refresh_tokens(conn, row["user_id"])
+    return {**row, "status": "suspended"}
+
+
+def reactivate_membership(conn, membership_id) -> dict:
+    """Flip a suspended membership back to active and clear the suspend
+    fields. Does not restore old sessions — the user logs in fresh.
+    Idempotent, same reasoning as suspend_membership. Returns None if the
+    membership doesn't exist."""
+    row = conn.execute(
+        """SELECT id, status FROM memberships
+           WHERE id = %s AND deleted_at IS NULL""",
+        (membership_id,),
+    ).fetchone()
+    if not row:
+        return None
+    if row["status"] == "active":
+        return row
+    conn.execute(
+        """UPDATE memberships
+           SET status = 'active', suspended_at = NULL,
+               suspended_by = NULL, suspend_reason = NULL
+           WHERE id = %s""",
+        (membership_id,),
+    )
+    return {**row, "status": "active"}
+
+
 def audit(conn, company_id, user_id, action, subject_type=None, subject_id=None,
           details=None):
     from psycopg.types.json import Jsonb

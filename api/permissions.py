@@ -78,13 +78,20 @@ def company_member(company_id: str, user: dict = Depends(current_user)) -> AuthC
         raise HTTPException(404, "Company not found")
     with get_pool().connection() as conn:
         m = conn.execute(
-            """SELECT id FROM memberships
-               WHERE company_id = %s AND user_id = %s AND status = 'active'
-                 AND deleted_at IS NULL""",
+            """SELECT id, status FROM memberships
+               WHERE company_id = %s AND user_id = %s AND deleted_at IS NULL""",
             (company_id, user["id"]),
         ).fetchone()
         if not m:
-            raise HTTPException(403, "Not a member of this company")
+            raise HTTPException(403, {"code": "not_a_member",
+                                      "message": "Not a member of this company"})
+        if m["status"] != "active":
+            # Rejected on the next access-token check, so a suspension takes
+            # effect within one token TTL (<=30 min) even without revocation —
+            # revoke_all_refresh_tokens (called by suspend_membership) makes
+            # sure there's no lingering refresh token to mint a new one, either.
+            raise HTTPException(403, {"code": "account_suspended",
+                                      "message": "Your account has been suspended."})
         roles = conn.execute(
             """SELECT r.id, r.name, r.scope, r.permissions
                FROM membership_roles mr JOIN roles r ON r.id = mr.role_id
@@ -93,6 +100,18 @@ def company_member(company_id: str, user: dict = Depends(current_user)) -> AuthC
         ).fetchall()
     return AuthContext(user=user, company_id=company_id,
                        membership_id=str(m["id"]), roles=roles)
+
+
+def resolve_permissions(roles) -> dict:
+    """Union-of-roles module -> sorted actions. Same computation /me already
+    does inline; factored out so the admin member-detail endpoint (which
+    resolves a *target* member's roles, not the caller's) doesn't duplicate
+    it."""
+    effective = {}
+    for role in roles:
+        for module, actions in role["permissions"].items():
+            effective.setdefault(module, set()).update(actions)
+    return {k: sorted(v) for k, v in effective.items()}
 
 
 def require(module: str, action: str):
