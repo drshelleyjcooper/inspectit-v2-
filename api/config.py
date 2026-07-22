@@ -49,8 +49,15 @@ def check_production_config(is_production: bool, jwt_secret_env,
             "Refusing to start with APP_ENV=production: " + "; ".join(problems))
 
 
-check_production_config(IS_PRODUCTION, os.environ.get("JWT_SECRET"),
-                        DEV_MODE, ALLOWED_ORIGINS)
+_PRODUCTION_PROBLEMS = None
+
+try:
+    check_production_config(IS_PRODUCTION, os.environ.get("JWT_SECRET"),
+                            DEV_MODE, ALLOWED_ORIGINS)
+except RuntimeError as exc:
+    _PRODUCTION_PROBLEMS = str(exc)
+    import logging
+    logging.getLogger("inspectit").error("CONFIG: %s", exc)
 
 
 def _jwt_secret() -> str:

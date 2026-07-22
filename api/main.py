@@ -72,10 +72,12 @@ app.include_router(collections.router)
 @app.get("/health")
 def health():
     result = {"ok": True}
+    if config._PRODUCTION_PROBLEMS:
+        result["config"] = config._PRODUCTION_PROBLEMS
     try:
         with get_pool().connection() as conn:
             conn.execute("SELECT 1")
         result["db"] = "connected"
-    except Exception:
-        result["db"] = "unavailable"
+    except Exception as exc:
+        result["db"] = f"unavailable: {exc}"
     return result
