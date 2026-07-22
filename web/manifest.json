@@ -1,0 +1,26 @@
+{
+  "name": "Inspectit.app",
+  "short_name": "Inspectit",
+  "description": "Vehicle and property inspection, maintenance, repair, and warranty management.",
+  "start_url": "/web/inspectit-app.html",
+  "scope": "/web/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#1E64D3",
+  "background_color": "#FFFFFF",
+  "icons": [
+    {
+      "src": "/web/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/web/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "utilities"]
+}

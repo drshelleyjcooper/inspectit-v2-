@@ -3,6 +3,7 @@
 .filestore/
 .filestore_test/
 .jwt_secret
+.env*
 __pycache__/
 *.pyc
 .pytest_cache/
