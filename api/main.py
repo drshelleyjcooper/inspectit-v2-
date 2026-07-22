@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 import logging
 
@@ -81,3 +83,12 @@ def health():
     except Exception as exc:
         result["db"] = f"unavailable: {exc}"
     return result
+
+
+@app.get("/")
+def landing():
+    return FileResponse(config.PROJECT_ROOT / "index.html", media_type="text/html")
+
+
+app.mount("/web", StaticFiles(directory=config.PROJECT_ROOT / "web", html=True),
+          name="web")
