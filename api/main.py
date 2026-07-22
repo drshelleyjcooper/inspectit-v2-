@@ -22,12 +22,19 @@ from .routers import (assignments, auth, collections, entities, importer, me,
                       members)
 
 
+log = logging.getLogger("inspectit")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    run_migrations()
-    with get_pool().connection() as conn:
-        seed_role_presets(conn)
-        cleanup_expired(conn)   # F9: purge dead token/reset/invite rows
+    try:
+        run_migrations()
+        with get_pool().connection() as conn:
+            seed_role_presets(conn)
+            cleanup_expired(conn)
+        log.info("Database ready")
+    except Exception as exc:
+        log.error("Startup DB init failed (app will serve, DB routes will error): %s", exc)
     yield
 
 
@@ -64,6 +71,11 @@ app.include_router(collections.router)
 
 @app.get("/health")
 def health():
-    with get_pool().connection() as conn:
-        conn.execute("SELECT 1")
-    return {"ok": True}
+    result = {"ok": True}
+    try:
+        with get_pool().connection() as conn:
+            conn.execute("SELECT 1")
+        result["db"] = "connected"
+    except Exception:
+        result["db"] = "unavailable"
+    return result
