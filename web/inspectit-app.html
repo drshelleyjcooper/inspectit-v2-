@@ -805,6 +805,7 @@ async function cloudSyncNow(isInitial) {
   cloudSaveCfg(cur);
   await cloudFlush();
   if (pulled) cloudRerender(); else renderCloudStatus();
+  track("sync_completed", { pulled: pulled > 0 });
   return pulled;
 }
 
@@ -879,6 +880,82 @@ window.addEventListener("online", () => {
   if (c && c.refresh) cloudFlush();
 });
 /* ==================== /CLOUD SYNC ==================== */
+
+/* ==================== ANALYTICS EVENT EMITTER (Stage 1) ====================
+   Queues events in localStorage — works fully offline, same as the rest of
+   this app; the Desktop copy must never block on network. Flushes small
+   batches on an interval and on page-hide, to POST /companies/{cid}/events.
+   Fire-and-forget: a failed flush is a dropped metric, never a broken app —
+   nothing here throws uphill, nothing surfaces to the user, and (per the
+   privacy posture below) nothing is ever logged to console even on failure.
+
+   Privacy: event_props carry only coarse feature names/kinds — id/enum-like
+   values a platform admin reading AGGREGATE analytics should see, never
+   inspection contents, plate numbers, addresses, or other record data. Call
+   sites must not pass record fields into props; the server (api/analytics.py
+   validate_props) enforces size/shape as a backstop, not a PII filter — that
+   discipline lives here, at the only place events originate. */
+const ANALYTICS_QUEUE_KEY = "inspectit.analytics.queue";
+const ANALYTICS_SESSION_KEY = "inspectit.analytics.session";
+const ANALYTICS_FLUSH_INTERVAL_MS = 20000;
+const ANALYTICS_MAX_QUEUE = 200;          // oldest dropped past this
+const ANALYTICS_BATCH_SIZE = 50;          // matches config.EVENTS_MAX_BATCH
+const ANALYTICS_SESSION_IDLE_MS = 30 * 60 * 1000;   // session_id rotates after 30 min idle
+
+let analyticsFlushing = false;
+
+function analyticsSessionId() {
+  const now = Date.now();
+  const cached = getJSON(ANALYTICS_SESSION_KEY, null);
+  if (cached && (now - cached.last) < ANALYTICS_SESSION_IDLE_MS) {
+    cached.last = now;
+    setJSON(ANALYTICS_SESSION_KEY, cached);
+    return cached.id;
+  }
+  const id = "sess_" + now.toString(36) + Math.random().toString(36).slice(2, 8);
+  setJSON(ANALYTICS_SESSION_KEY, { id, last: now });
+  return id;
+}
+
+function track(eventName, props) {
+  try {
+    const q = getJSON(ANALYTICS_QUEUE_KEY, []);
+    q.push({
+      event_name: eventName,
+      event_props: props || {},
+      session_id: analyticsSessionId(),
+      occurred_at: new Date().toISOString(),
+    });
+    while (q.length > ANALYTICS_MAX_QUEUE) q.shift();   // offline use can't grow this unbounded
+    setJSON(ANALYTICS_QUEUE_KEY, q);
+  } catch (_) { /* storage full/unavailable — drop silently */ }
+}
+
+async function analyticsFlush() {
+  if (analyticsFlushing || !cloudSignedIn()) return;   // nothing to flush to yet
+  const q = getJSON(ANALYTICS_QUEUE_KEY, []);
+  if (!q.length) return;
+  analyticsFlushing = true;
+  try {
+    const batch = q.slice(0, ANALYTICS_BATCH_SIZE);
+    const c = cloudCfg();
+    const r = await cloudFetch(`/companies/${c.company}/events`,
+      { method: "POST", body: { events: batch } });
+    if (r.ok) {
+      // Drop only what was actually sent — anything queued mid-flight stays.
+      setJSON(ANALYTICS_QUEUE_KEY, getJSON(ANALYTICS_QUEUE_KEY, []).slice(batch.length));
+    }
+    // Non-OK or thrown: leave the queue untouched, retry next interval.
+  } catch (_) { /* network/auth failure — never break the app over a metric */ }
+  finally { analyticsFlushing = false; }
+}
+
+setInterval(analyticsFlush, ANALYTICS_FLUSH_INTERVAL_MS);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") analyticsFlush();
+});
+window.addEventListener("pagehide", analyticsFlush);
+/* ==================== /ANALYTICS EVENT EMITTER ==================== */
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -988,6 +1065,7 @@ function enterApp() {
   renderProfileChip();
   navigate("home");
   cloudOnEnter();   // pull cloud changes / push pending (no-op when signed out)
+  track("session_start", {});
 }
 
 /* ---------- navigation ---------- */
@@ -998,6 +1076,7 @@ function navigate(view) {
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === view));
   $("pageTitle").textContent = TITLES[view] || "";
   $("returnHome").classList.toggle("hidden", view === "home");
+  track("page_view", { page: view });
   if (view === "home") renderHome();
   if (view === "vehicles") vehReset();
   if (view === "properties") propReset();
@@ -1211,6 +1290,7 @@ function exportBackup() {
   store.set("inspectit.lastBackup", new Date().toISOString());
   renderBackupStatus();
   toast("Backup saved to your Downloads folder");
+  track("export_run", { kind: "backup" });
 }
 $("btnExport").addEventListener("click", exportBackup);
 
@@ -1471,6 +1551,9 @@ const getInspections = () => getJSON(K.inspections, {});
 const setInspections = m => setJSON(K.inspections, m);
 const vehicleInspections = id => getInspections()[id] || [];
 function addInspection(id, summary) {
+  track("inspection_saved", { kind: "vehicle" });
+  if (summary.template) track("template_used", { kind: "vehicle" });
+  if (summary.record && summary.record.diagramImage) track("diagram_edited", { kind: "vehicle" });
   const m = getInspections();
   const arr = (m[id] = m[id] || []);
   arr.unshift(summary);
@@ -1597,7 +1680,7 @@ function renderVehForm(root) {
     e.target.value = "";
     if (!f) return;
     if (!f.type.startsWith("image/")) { alert("Please choose an image file."); return; }
-    compressImageFile(f, 1200, 0.82).then(durl => { if (durl) { vehPhoto = durl; renderVehPhoto(); } });
+    compressImageFile(f, 1200, 0.82).then(durl => { if (durl) { vehPhoto = durl; renderVehPhoto(); track("upload_added", { kind: "photo" }); } });
   };
   $("vehSave").onclick = vehSave;
 }
@@ -1709,6 +1792,7 @@ function renderVehTool(root) {
 }
 
 function renderInspection(root, v, tm) {
+  track("inspection_started", { kind: "vehicle" });
   root.innerHTML = `
     <button class="back-link" id="toolBack">${backSVG} Back to vehicles</button>
     <div class="page-head"><h1>Inspection</h1><p>${esc(v.vehicleId)} · ${esc(tm.label)} — vehicle details are carried over and locked below.</p></div>
@@ -2003,6 +2087,7 @@ function saveTicket(vehId, ticket) {
   const m = getTickets();
   const arr = (m[vehId] = m[vehId] || []);
   const i = arr.findIndex(t => t.id === ticket.id);
+  if (i < 0) track("ticket_created", { kind: "vehicle" });
   if (i >= 0) arr[i] = ticket; else arr.unshift(ticket);
   arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   try { setTickets(m); return true; }
@@ -2209,7 +2294,7 @@ function renderRepairForm(root, v, tm) {
     let pending = files.length;
     files.forEach(f => {
       const r = new FileReader();
-      r.onload = () => { repairAttachments.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: r.result }); if (--pending === 0) renderAtt(); };
+      r.onload = () => { repairAttachments.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: r.result }); track("upload_added", { kind: "document" }); if (--pending === 0) renderAtt(); };
       r.onerror = () => { if (--pending === 0) renderAtt(); };
       r.readAsDataURL(f);
     });
@@ -2527,7 +2612,7 @@ function renderPropForm(root) {
     e.target.value = "";
     if (!f) return;
     if (!f.type.startsWith("image/")) { alert("Please choose an image file."); return; }
-    compressImageFile(f, 1200, 0.82).then(durl => { if (durl) { propPhoto = durl; renderPropPhoto(); } });
+    compressImageFile(f, 1200, 0.82).then(durl => { if (durl) { propPhoto = durl; renderPropPhoto(); track("upload_added", { kind: "photo" }); } });
   };
   $("propSave").onclick = propSave;
 }
@@ -2611,6 +2696,9 @@ function renderPropTool(root) {
 const PROP_TEMPLATE_KEY = { residential: "__home_apartment__", commercial: "__commercial_property__", accessible: "__accessible_housing__" };
 const setPropInspections = m => setJSON(K.propertyInspections, m);
 function addPropInspection(id, summary) {
+  track("inspection_saved", { kind: "property" });
+  if (summary.template) track("template_used", { kind: "property" });
+  if (summary.record && summary.record.diagramImage) track("diagram_edited", { kind: "property" });
   const m = getPropInspections();
   const arr = (m[id] = m[id] || []);
   arr.unshift(summary);
@@ -2623,6 +2711,7 @@ function addPropInspection(id, summary) {
 }
 
 function renderPropInspection(root, p, tm) {
+  track("inspection_started", { kind: "property" });
   root.innerHTML = `
     <button class="back-link" id="ptoolBack">${backSVG} Back to properties</button>
     <div class="page-head"><h1>Inspection</h1><p>${esc(p.propertyId)} · ${esc(tm.label)} — property details are carried over and locked below.</p></div>
@@ -2811,6 +2900,7 @@ function savePropTicket(propId, ticket) {
   const m = getPropTickets();
   const arr = (m[propId] = m[propId] || []);
   const i = arr.findIndex(t => t.id === ticket.id);
+  if (i < 0) track("ticket_created", { kind: "property" });
   if (i >= 0) arr[i] = ticket; else arr.unshift(ticket);
   arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || "").localeCompare(a.createdAt || ""));
   try { setPropTickets(m); return true; }
@@ -3018,7 +3108,7 @@ function renderPropRepairForm(root, p, tm) {
     let pending = files.length;
     files.forEach(f => {
       const r = new FileReader();
-      r.onload = () => { propRepairAttachments.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: r.result }); if (--pending === 0) renderAtt(); };
+      r.onload = () => { propRepairAttachments.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: r.result }); track("upload_added", { kind: "document" }); if (--pending === 0) renderAtt(); };
       r.onerror = () => { if (--pending === 0) renderAtt(); };
       r.readAsDataURL(f);
     });
@@ -3865,7 +3955,7 @@ function makeWarranties(cfg) {
       let pending = files.length;
       files.forEach(f => {
         const rd = new FileReader();
-        rd.onload = () => { atts.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: rd.result }); if (--pending === 0) renderAtt(); };
+        rd.onload = () => { atts.push({ name: f.name, type: f.type || "application/pdf", size: f.size, dataURL: rd.result }); track("upload_added", { kind: "document" }); if (--pending === 0) renderAtt(); };
         rd.onerror = () => { if (--pending === 0) renderAtt(); };
         rd.readAsDataURL(f);
       });

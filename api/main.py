@@ -20,8 +20,8 @@ from .presets import seed_role_presets
 from .requestmeta import RequestMetaMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from .routers import (assignments, auth, collections, entities, importer, me,
-                      members)
+from .routers import (assignments, auth, collections, entities, events,
+                      importer, me, members)
 
 
 log = logging.getLogger("inspectit")
@@ -69,6 +69,7 @@ app.include_router(entities.router)
 app.include_router(assignments.router)
 app.include_router(importer.router)
 app.include_router(collections.router)
+app.include_router(events.router)
 
 
 @app.get("/health")

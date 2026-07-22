@@ -46,6 +46,7 @@ class RateLimiter:
 
 
 auth_limiter = RateLimiter(config.AUTH_RATE_LIMIT, config.AUTH_RATE_WINDOW_S)
+events_limiter = RateLimiter(config.EVENTS_RATE_LIMIT, config.EVENTS_RATE_WINDOW_S)
 
 
 def client_ip(request: Request) -> str:

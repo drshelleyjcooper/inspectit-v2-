@@ -90,6 +90,15 @@ REFRESH_TOKEN_TTL_DAYS = int(os.environ.get("REFRESH_TOKEN_TTL_DAYS", "30"))
 RESET_TOKEN_TTL_MIN = int(os.environ.get("RESET_TOKEN_TTL_MIN", "60"))
 INVITE_TTL_DAYS = int(os.environ.get("INVITE_TTL_DAYS", "14"))
 
+# Analytics-event ingest (per authenticated user): request-volume brake, not
+# a raw-event-count limit — batching already caps events per request.
+EVENTS_RATE_LIMIT = int(os.environ.get("EVENTS_RATE_LIMIT", "20"))
+EVENTS_RATE_WINDOW_S = int(os.environ.get("EVENTS_RATE_WINDOW_S", "60"))
+EVENTS_MAX_BATCH = int(os.environ.get("EVENTS_MAX_BATCH", "50"))
+# Raw events retained this long once a daily-rollup job exists to age them
+# out into (Stage 2+); not enforced yet, see migrations/004_events.sql.
+EVENTS_RAW_RETENTION_DAYS = int(os.environ.get("EVENTS_RAW_RETENTION_DAYS", "90"))
+
 # 'local' (dev: files under ./.filestore) or 's3' (DigitalOcean Spaces)
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
 STORAGE_DIR = os.environ.get("STORAGE_DIR", str(PROJECT_ROOT / ".filestore"))
