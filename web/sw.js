@@ -1,4 +1,4 @@
-const CACHE_NAME = 'inspectit-v1';
+const CACHE_NAME = 'inspectit-v2';
 const ASSETS = [
   '/web/inspectit-app.html',
   '/web/manifest.json',
@@ -36,16 +36,20 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Network-first: always try to serve the current deployed version when
+  // online, and only fall back to the cache when the network genuinely
+  // fails (offline). The old cache-first strategy returned a cached
+  // response immediately whenever one existed, so every deploy looked
+  // broken to returning users until they manually cleared their cache —
+  // the network fetch only ever updated the cache for a future load that
+  // still wouldn't use it, since a cached response would already exist.
   event.respondWith(
-    caches.match(event.request).then(cached => {
-      const fetched = fetch(event.request).then(response => {
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      }).catch(() => cached);
-      return cached || fetched;
-    })
+    fetch(event.request).then(response => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+      }
+      return response;
+    }).catch(() => caches.match(event.request))
   );
 });

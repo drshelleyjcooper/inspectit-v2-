@@ -85,9 +85,25 @@ def health():
     return result
 
 
+# no-cache on the two HTML shells: the deployed files' mtimes are flattened
+# to a fixed date by the build (observed: 1980-01-01 in production), which
+# makes browsers' own heuristic freshness calculation treat them as
+# effectively permanently fresh — independent of the service worker's own
+# (separately fixed) caching bug. Static assets under /web otherwise keep
+# normal caching; they're versioned by filename/rarely change.
+_NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
 def landing():
-    return FileResponse(config.PROJECT_ROOT / "index.html", media_type="text/html")
+    return FileResponse(config.PROJECT_ROOT / "index.html", media_type="text/html",
+                        headers=_NO_CACHE)
+
+
+@app.get("/web/inspectit-app.html")
+def app_shell():
+    return FileResponse(config.PROJECT_ROOT / "web" / "inspectit-app.html",
+                        media_type="text/html", headers=_NO_CACHE)
 
 
 app.mount("/web", StaticFiles(directory=config.PROJECT_ROOT / "web", html=True),
