@@ -180,6 +180,26 @@
   .profile-chip .pc-name { font-weight: 600; font-size: .9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   .profile-chip .pc-meta { font-size: .76rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 
+  /* who's actually signed in — distinct from the editable company profile
+     chip, which shows locally-entered display info, not the real account */
+  .account-badge {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border-radius: 10px;
+    background: #eef2f8; border: 1px solid var(--border); flex: none;
+  }
+  .account-badge__text { line-height: 1.25; min-width: 0; }
+  .account-badge__label { font-size: .66rem; color: var(--muted); }
+  .account-badge__email {
+    font-size: .82rem; font-weight: 600; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+  }
+  .account-badge__logout {
+    background: none; border: none; color: var(--brand); font-weight: 600;
+    font-size: .78rem; cursor: pointer; padding: 5px 8px; border-radius: 6px;
+    white-space: nowrap; flex: none;
+  }
+  .account-badge__logout:hover { background: #e3ecfa; text-decoration: underline; }
+
   .content { padding: 30px 26px 60px; max-width: 920px; width: 100%; }
   .view { display: none; animation: fade .18s ease both; }
   .view.active { display: block; }
@@ -425,6 +445,8 @@
     .topbar { padding: 12px 16px; }
     .content { padding: 22px 16px 50px; }
     .profile-chip .pc-name, .profile-chip .pc-meta { max-width: 130px; }
+    .account-badge__label { display: none; }
+    .account-badge__email { max-width: 110px; }
   }
   @media (prefers-reduced-motion: reduce) {
     .view { animation: none; }
@@ -512,6 +534,13 @@
         <svg viewBox="0 0 24 24" fill="none"><path d="M3 11l9-7 9 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9h14v-9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
         Home</button>
       <div class="spacer"></div>
+      <div class="account-badge hidden" id="accountBadge">
+        <div class="account-badge__text">
+          <div class="account-badge__label">Signed in as</div>
+          <div class="account-badge__email" id="accountBadgeEmail"></div>
+        </div>
+        <button class="account-badge__logout" id="accountBadgeLogout" title="Not you? Log out">Not you?</button>
+      </div>
       <div class="profile-chip" id="profileChip"></div>
     </header>
 
@@ -986,8 +1015,19 @@ $("capRefresh").addEventListener("click", newCaptcha);
 function enterApp() {
   showScreen("app");
   renderProfileChip();
+  renderAccountBadge();
   navigate("home");
   cloudOnEnter();   // pull cloud changes / push pending (no-op when signed out)
+}
+
+/* ---------- who's actually signed in (distinct from the editable company
+   profile chip, which shows locally-entered display info) ---------- */
+function renderAccountBadge() {
+  const badge = $("accountBadge");
+  const c = cloudCfg();
+  if (!c || !c.email) { badge.classList.add("hidden"); return; }
+  $("accountBadgeEmail").textContent = c.email;
+  badge.classList.remove("hidden");
 }
 
 /* ---------- navigation ---------- */
@@ -1135,10 +1175,16 @@ $("cancelEdit").addEventListener("click", () => { profileMode = "view"; renderHo
 $("btnEditProfile").addEventListener("click", () => { profileMode = "edit"; renderHome(); });
 
 /* ---------- logout ---------- */
-$("btnLogout").addEventListener("click", () => {
-  if (!confirm("Log out of Inspectit.app?")) return;
+function doLogout(promptText) {
+  if (!confirm(promptText)) return;
   store.remove(K.session);
   renderLogin();
+}
+$("btnLogout").addEventListener("click", () => doLogout("Log out of Inspectit.app?"));
+$("accountBadgeLogout").addEventListener("click", () => {
+  const c = cloudCfg();
+  const who = (c && c.email) ? ` (${c.email})` : "";
+  doLogout(`Log out${who}? You can sign back in with a different account afterward.`);
 });
 
 /* ---------- modal helper ---------- */
