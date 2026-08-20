@@ -5,6 +5,7 @@ automatically and files go to ./.filestore. In production on DigitalOcean App
 Platform, set DATABASE_URL (Managed Postgres), JWT_SECRET, and the SPACES_*
 variables.
 """
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -56,8 +57,14 @@ try:
                             DEV_MODE, ALLOWED_ORIGINS)
 except RuntimeError as exc:
     _PRODUCTION_PROBLEMS = str(exc)
-    import logging
     logging.getLogger("inspectit").error("CONFIG: %s", exc)
+    # Previously this was logged and swallowed, so a production deploy missing
+    # JWT_SECRET would boot anyway and fall through to the dev-only file
+    # fallback below. On App Platform that file is ephemeral, so every deploy
+    # silently rotated the signing key and 401'd every existing session.
+    # Fail the deploy instead — a broken deploy is visible, a rotating key is not.
+    if IS_PRODUCTION:
+        raise
 
 
 def _jwt_secret() -> str:
@@ -65,7 +72,15 @@ def _jwt_secret() -> str:
     if env:
         return env
     # Dev-only fallback: generate once and persist beside the repo so tokens
-    # survive restarts. Production is gated above and never reaches this.
+    # survive restarts. Guarded twice on purpose — the check above should
+    # already have stopped a production boot, but this fallback must never
+    # be reachable in production even if that guard is changed or bypassed.
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            "JWT_SECRET must be set in production. The on-disk fallback is "
+            "dev-only: on App Platform the container filesystem is ephemeral, "
+            "so every deploy would issue a new signing key and invalidate all "
+            "existing sessions.")
     f = PROJECT_ROOT / ".jwt_secret"
     if not f.exists():
         f.write_text(secrets.token_hex(32))
