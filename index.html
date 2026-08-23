@@ -69,6 +69,28 @@ ul,ol{list-style:none}
 .nav__links .nav__cta{display:inline-flex;align-items:center;gap:6px;padding:10px 22px;background:var(--blue);color:var(--white);font-weight:600;font-size:.9rem;border-radius:8px;transition:background .2s,transform .15s}
 .nav__links .nav__cta:hover{background:var(--blue-lift);color:var(--white);transform:translateY(-1px)}
 .nav__cta:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+/* demo video button — outline sibling of the Log In CTA */
+.btn-demo{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-family:inherit}
+.nav__links .btn-demo{padding:10px 20px;background:transparent;color:var(--blue);border:2px solid var(--blue);font-weight:600;font-size:.9rem;border-radius:8px;transition:background .2s,color .2s,transform .15s;margin-right:10px}
+.nav__links .btn-demo:hover{background:var(--blue);color:var(--white);transform:translateY(-1px)}
+.btn-demo:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.btn-demo .play{width:0;height:0;flex:none;border-left:8px solid currentColor;border-top:5px solid transparent;border-bottom:5px solid transparent;transition:transform .2s}
+.btn-demo:hover .play{transform:scale(1.15)}
+.hero__actions .btn-demo{padding:14px 32px;background:transparent;color:var(--blue);border:2px solid var(--blue);font-weight:600;font-size:1rem;border-radius:10px;transition:background .2s,color .2s,transform .15s}
+.hero__actions .btn-demo:hover{background:var(--blue);color:var(--white);transform:translateY(-2px)}
+.drawer-demo{display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;font-family:inherit;width:100%;margin-top:12px;padding:14px;background:transparent;color:var(--blue);border:2px solid var(--blue);font-weight:600;font-size:1rem;border-radius:10px}
+.drawer-demo .play{width:0;height:0;border-left:8px solid currentColor;border-top:5px solid transparent;border-bottom:5px solid transparent}
+/* video lightbox */
+.vbox{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:clamp(16px,4vw,48px);background:rgba(11,33,56,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;visibility:hidden;transition:opacity .35s ease,visibility .35s ease}
+.vbox.on{opacity:1;visibility:visible}
+.vbox__panel{position:relative;width:min(960px,100%);border-radius:16px;overflow:hidden;background:#000;box-shadow:0 40px 90px -30px rgba(0,0,0,.7);transform:translateY(18px) scale(.97);opacity:0;transition:transform .45s cubic-bezier(.16,1,.3,1),opacity .45s ease}
+.vbox.on .vbox__panel{transform:none;opacity:1}
+.vbox__panel video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#000}
+.vbox__close{position:absolute;top:12px;right:12px;width:42px;height:42px;border-radius:999px;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.12);color:#fff;cursor:pointer;display:grid;place-items:center;transition:background .2s,transform .3s}
+.vbox__close:hover{background:rgba(255,255,255,.24);transform:rotate(90deg)}
+.vbox__close::before,.vbox__close::after{content:"";position:absolute;width:16px;height:2px;background:#fff;border-radius:2px}
+.vbox__close::before{transform:rotate(45deg)}
+.vbox__close::after{transform:rotate(-45deg)}
 
 /* language switcher */
 .lang-switch{position:relative}
@@ -288,6 +310,7 @@ ul,ol{list-style:none}
           <button role="menuitem" data-lang="ja">Japanese</button>
         </div>
       </div>
+      <button type="button" class="btn-demo" data-video><span class="play" aria-hidden="true"></span>Demo video</button>
       <a href="web/inspectit-app.html" class="nav__cta">Log In</a>
     </div>
     <button class="nav__hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
@@ -318,6 +341,7 @@ ul,ol{list-style:none}
     </select>
   </div>
   <a href="web/inspectit-app.html" class="drawer-cta">Log In</a>
+  <button type="button" class="drawer-demo" data-video><span class="play" aria-hidden="true"></span>Demo video</button>
 </div>
 
 <!-- ===== HERO ===== -->
@@ -335,6 +359,7 @@ ul,ol{list-style:none}
       <div class="hero__actions">
         <a href="mailto:info@inspectit.app?subject=Demo%20Request" class="btn-primary">Schedule a demo</a>
         <a href="web/inspectit-app.html" class="btn-ghost">Log In</a>
+        <button type="button" class="btn-demo" data-video><span class="play" aria-hidden="true"></span>Demo video</button>
       </div>
     </div>
   </div>
@@ -779,6 +804,28 @@ ul,ol{list-style:none}
   window.addEventListener('scroll', onScroll, {passive: true});
   window.addEventListener('resize', onScroll, {passive: true});
   onScroll();
+})();
+</script>
+
+<!-- ===== demo video lightbox ===== -->
+<div class="vbox" id="vbox" role="dialog" aria-modal="true" aria-label="Inspectit.app demo video">
+  <div class="vbox__panel">
+    <button type="button" class="vbox__close" id="vboxClose" aria-label="Close video"></button>
+    <video id="vboxVideo" controls playsinline preload="none">
+      <source src="Inspectit_app_2.mp4" type="video/mp4">
+      Your browser can't play this video. <a href="Inspectit_app_2.mp4" style="color:#fff">Download it</a>.
+    </video>
+  </div>
+</div>
+<script>
+(function(){
+  var vbox=document.getElementById('vbox'),v=document.getElementById('vboxVideo'),x=document.getElementById('vboxClose'),last=null;
+  function open(){last=document.activeElement;vbox.classList.add('on');document.body.style.overflow='hidden';x.focus();try{v.play();}catch(e){}}
+  function close(){vbox.classList.remove('on');document.body.style.overflow='';try{v.pause();}catch(e){}if(last)last.focus();}
+  document.querySelectorAll('[data-video]').forEach(function(b){b.addEventListener('click',open);});
+  x.addEventListener('click',close);
+  vbox.addEventListener('click',function(e){if(e.target===vbox)close();});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&vbox.classList.contains('on'))close();});
 })();
 </script>
 </body>
