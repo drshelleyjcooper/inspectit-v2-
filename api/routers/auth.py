@@ -109,7 +109,11 @@ def login(body: LoginIn):
         if not user or not user["password_hash"] or \
                 not security.verify_password(body.password, user["password_hash"]):
             raise HTTPException(401, "Invalid email or password")
+        if user.get("disabled_at"):
+            raise HTTPException(403, "This account has been disabled")
         cleanup_user_tokens(conn, user["id"])   # F9: opportunistic sweep
+        conn.execute("UPDATE users SET last_login_at = now() WHERE id = %s",
+                     (user["id"],))
         return {"user_id": str(user["id"]), **_token_pair(conn, user["id"])}
 
 
