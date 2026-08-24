@@ -12,6 +12,13 @@ services:
     instance_size_slug: basic-xxs
     instance_count: 1
     http_port: 8080
+    # The API serves the landing page (/) and the app (/web/...) itself
+    # (see api/main.py), so it owns the whole domain. Do NOT add a separate
+    # static-site component on "/" — App Platform would route "/auth/*",
+    # "/me", etc. to the static site and the app would get HTML 404s
+    # instead of JSON ("Request failed (404)" on the login screen).
+    routes:
+      - path: /
     health_check:
       http_path: /health
     envs:
@@ -25,6 +32,10 @@ services:
         value: https://inspectit.app,https://www.inspectit.app
       - key: POOL_MAX
         value: "5"
+      # First platform admin(s) for /web/admin.html — must already have an
+      # account. Comma-separated.
+      - key: PLATFORM_ADMIN_EMAILS
+        value: "you@inspectit.app"
       - key: STORAGE_BACKEND
         value: s3
       - key: SPACES_REGION
@@ -35,16 +46,6 @@ services:
         type: SECRET
       - key: SPACES_SECRET
         type: SECRET
-static_sites:
-  - name: web
-    github:
-      repo: drshelleyjcooper/inspectit-v2-
-      branch: main
-      deploy_on_push: true
-    source_dir: /
-    index_document: index.html
-    routes:
-      - path: /
 databases:
   - name: inspectit-db
     engine: PG
