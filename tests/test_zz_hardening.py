@@ -84,9 +84,11 @@ def test_auth_routes_are_rate_limited(client):
 
 # ---------- quality-check fixes on the rate limiter ----------
 
-def test_client_ip_uses_last_forwarded_entry():
-    """First X-Forwarded-For entries are client-spoofable; the proxy appends
-    the real address last."""
+def test_client_ip_prefers_do_connecting_ip():
+    """On DO App Platform, X-Forwarded-For holds the *ingress* server's IP
+    (identical for every visitor); the client's real address is in
+    do-connecting-ip. Keying the limiter on XFF put the whole site in one
+    10-requests/minute bucket and locked everyone out of login."""
     from api.ratelimit import client_ip
 
     class FakeClient:
@@ -94,12 +96,42 @@ def test_client_ip_uses_last_forwarded_entry():
 
     class FakeRequest:
         client = FakeClient()
-        def __init__(self, xff):
-            self.headers = {"x-forwarded-for": xff} if xff else {}
+        def __init__(self, **headers):
+            self.headers = headers
 
-    assert client_ip(FakeRequest("1.2.3.4")) == "1.2.3.4"
-    assert client_ip(FakeRequest("spoofed.evil, 5.6.7.8")) == "5.6.7.8"
-    assert client_ip(FakeRequest(None)) == "10.0.0.9"
+    # App Platform shape: XFF is the ingress, do-connecting-ip is the user.
+    assert client_ip(FakeRequest(**{"x-forwarded-for": "10.244.0.1",
+                                    "do-connecting-ip": "1.2.3.4"})) == "1.2.3.4"
+    # Cloudflare / nginx fallbacks.
+    assert client_ip(FakeRequest(**{"cf-connecting-ip": "9.9.9.9"})) == "9.9.9.9"
+    assert client_ip(FakeRequest(**{"x-real-ip": "8.8.8.8"})) == "8.8.8.8"
+    # Plain single proxy: last XFF entry (earlier ones are client-supplied).
+    assert client_ip(FakeRequest(**{"x-forwarded-for": "spoofed.evil, 5.6.7.8"})) == "5.6.7.8"
+    # No headers at all: TCP peer.
+    assert client_ip(FakeRequest()) == "10.0.0.9"
+
+
+def test_two_users_behind_same_ingress_get_separate_buckets(client):
+    """Regression for the production login outage: two different
+    do-connecting-ip values must not share one rate-limit budget."""
+    from api.ratelimit import auth_limiter
+    auth_limiter.reset()
+    old = auth_limiter.max_requests
+    auth_limiter.max_requests = 2
+    try:
+        base = {"x-forwarded-for": "10.244.0.1"}
+        for ip in ("203.0.113.1", "203.0.113.2"):
+            h = {**base, "do-connecting-ip": ip}
+            for _ in range(2):
+                r = client.post("/auth/login", headers=h,
+                                json={"email": "nobody@example.com", "password": "x"})
+                assert r.status_code == 401, r.text
+            r = client.post("/auth/login", headers=h,
+                            json={"email": "nobody@example.com", "password": "x"})
+            assert r.status_code == 429
+    finally:
+        auth_limiter.max_requests = old
+        auth_limiter.reset()
 
 
 def test_rate_limiter_cleanup_drops_stale_keys():
