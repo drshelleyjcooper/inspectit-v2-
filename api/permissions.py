@@ -68,6 +68,17 @@ def current_user(request: Request) -> dict:
                             (payload["sub"],)).fetchone()
     if not user:
         raise HTTPException(401, "Unknown user")
+    if user.get("disabled_at"):
+        raise HTTPException(403, "This account has been disabled")
+    return user
+
+
+def platform_admin(user: dict = Depends(current_user)) -> dict:
+    """Cross-tenant operator access (the /admin portal). Not a company role:
+    it is the users.is_platform_admin flag, set via PLATFORM_ADMIN_EMAILS or
+    by another platform admin."""
+    if not user.get("is_platform_admin"):
+        raise HTTPException(403, "Platform admin access required")
     return user
 
 
