@@ -105,6 +105,14 @@ REFRESH_TOKEN_TTL_DAYS = int(os.environ.get("REFRESH_TOKEN_TTL_DAYS", "30"))
 RESET_TOKEN_TTL_MIN = int(os.environ.get("RESET_TOKEN_TTL_MIN", "60"))
 INVITE_TTL_DAYS = int(os.environ.get("INVITE_TTL_DAYS", "14"))
 
+# Comma-separated emails that are promoted to platform admin at every startup
+# (idempotent). This is how the first admin is bootstrapped in production —
+# set it in the App Platform env vars, redeploy, and that account can open
+# /web/admin.html. Accounts must already exist (sign up in the app first).
+PLATFORM_ADMIN_EMAILS = [e.strip().lower() for e in
+                         os.environ.get("PLATFORM_ADMIN_EMAILS", "").split(",")
+                         if e.strip()]
+
 # 'local' (dev: files under ./.filestore) or 's3' (DigitalOcean Spaces)
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")
 STORAGE_DIR = os.environ.get("STORAGE_DIR", str(PROJECT_ROOT / ".filestore"))
