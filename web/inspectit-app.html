@@ -493,7 +493,8 @@
 
     <p class="login-foot">
       <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.7"/></svg>
-      <span>Forgot your password? Ask your company administrator to reset it.</span>
+      <span id="loginFootNote">Forgot your password? Ask your company administrator to reset it.</span>
+      <a href="#" id="loginModeSwitch" class="hidden"></a>
     </p>
   </div>
 </div>
@@ -870,7 +871,8 @@ async function cloudSignIn(api, email, password) {
 
 async function cloudCreateAccount(api, companyName, yourName, email, password) {
   const t = await cloudLoginRequest(api, "/auth/signup",
-    { company_name: companyName, name: yourName, email: email, password: password });
+    { company_name: companyName, name: yourName, email: email, password: password,
+      signup_code: SIGNUP_CODE || undefined });
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
                  company: t.company_id, companyName: companyName, meta: {}, pending: {} });
   await cloudSyncNow(true);
@@ -934,13 +936,16 @@ function showScreen(name) {
 
 /* ---------- login (real account: signup/signin hit the Inspectit API and
    turn cloud sync on automatically — no separate "Cloud sync" step needed) */
-/* Accounts are created by an administrator (admin portal or company
-   invitation), so the public app only offers sign-in. The "create" path is
-   kept for the in-app cloud dialog but is never shown here. */
-let loginMode = "signin";   // "create" | "signin"
+/* The public app only offers sign-in. Account creation is reachable through
+   a private link: /web/inspectit-app.html?signup   (or ?signup=<code> when
+   the server has SIGNUP_CODE set). The code is sent with the signup request. */
+const SIGNUP_PARAM = new URLSearchParams(location.search).get("signup");
+const SIGNUP_LINK = SIGNUP_PARAM !== null;
+const SIGNUP_CODE = SIGNUP_PARAM || "";
+let loginMode = SIGNUP_LINK ? "create" : "signin";   // "create" | "signin"
 function renderLogin() {
   const c = cloudCfg();
-  if (c && c.email) loginMode = "signin";
+  if (c && c.email && !SIGNUP_LINK) loginMode = "signin";
   const creating = loginMode === "create";
   $("loginSubtitle").textContent = creating
     ? "Create your company account — your data syncs automatically."
@@ -949,6 +954,11 @@ function renderLogin() {
   $("nameRow").classList.toggle("hidden", !creating);
   $("confirmRow").classList.toggle("hidden", !creating);
   $("loginSubmit").textContent = creating ? "Create account" : "Sign in";
+  $("loginFootNote").classList.toggle("hidden", SIGNUP_LINK);
+  $("loginModeSwitch").classList.toggle("hidden", !SIGNUP_LINK);
+  $("loginModeSwitch").textContent = creating
+    ? "Already have an account? Sign in"
+    : "Create a company account";
   $("loginCompany").value = "";
   $("loginName").value = "";
   $("loginEmail").value = (c && c.email) || "";
@@ -960,6 +970,12 @@ function renderLogin() {
   showScreen("login");
   setTimeout(() => $("loginEmail").focus(), 60);
 }
+
+$("loginModeSwitch").addEventListener("click", e => {
+  e.preventDefault();
+  loginMode = loginMode === "create" ? "signin" : "create";
+  renderLogin();
+});
 
 $("loginForm").addEventListener("submit", async e => {
   e.preventDefault();
