@@ -57,6 +57,150 @@ def list_members(limit: int = Query(200, ge=1, le=500),
     return [{**r, "membership_id": str(r["membership_id"]),
              "user_id": str(r["user_id"])} for r in rows]
 
+class MemberPatch(BaseModel):
+    role_ids: Optional[List[str]] = None
+    status: Optional[str] = None          # 'active' | 'suspended'
+
+
+def _load_membership(conn, company_id: str, membership_id: str):
+    try:
+        uuid.UUID(membership_id)
+    except ValueError:
+        raise HTTPException(404, "Member not found")
+    row = conn.execute(
+        """SELECT m.id, m.status, m.user_id, u.name, u.email
+           FROM memberships m JOIN users u ON u.id = m.user_id
+           WHERE m.id = %s AND m.company_id = %s AND m.deleted_at IS NULL""",
+        (membership_id, company_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Member not found")
+    return row
+
+
+def _validate_role_ids(conn, company_id: str, role_ids):
+    """Same check the invitation route makes: real roles, ours or preset."""
+    if not role_ids:
+        raise HTTPException(422, "At least one role is required")
+    for rid in role_ids:
+        ok = conn.execute(
+            """SELECT 1 FROM roles
+               WHERE id = %s AND (company_id IS NULL OR company_id = %s)
+                 AND deleted_at IS NULL""",
+            (rid, company_id),
+        ).fetchone()
+        if not ok:
+            raise HTTPException(422, f"Unknown role: {rid}")
+
+
+def _other_admins(conn, company_id: str, membership_id: str) -> int:
+    """Active members other than this one who can still manage users.
+
+    Keyed on the company:assign permission rather than a role name, so custom
+    roles count and renaming a preset can't quietly strand a company.
+    """
+    return conn.execute(
+        """SELECT count(DISTINCT m.id) AS n
+           FROM memberships m
+           JOIN membership_roles mr ON mr.membership_id = m.id
+           JOIN roles r ON r.id = mr.role_id AND r.deleted_at IS NULL
+           WHERE m.company_id = %s AND m.id <> %s
+             AND m.status = 'active' AND m.deleted_at IS NULL
+             AND jsonb_exists(r.permissions -> 'company', 'assign')""",
+        (company_id, membership_id),
+    ).fetchone()["n"]
+
+
+def _grants_user_management(conn, company_id: str, role_ids) -> bool:
+    return conn.execute(
+        """SELECT count(*) AS n FROM roles
+           WHERE id = ANY(%s::uuid[]) AND deleted_at IS NULL
+             AND (company_id IS NULL OR company_id = %s)
+             AND jsonb_exists(permissions -> 'company', 'assign')""",
+        (list(role_ids), company_id),
+    ).fetchone()["n"] > 0
+
+
+@router.patch("/members/{membership_id}")
+def update_member(membership_id: str, body: MemberPatch,
+                  ctx: AuthContext = Depends(require("company", "assign"))):
+    """Change a member's roles and/or suspend them.
+
+    Refuses any change that would leave the company with nobody able to manage
+    users — demoting the last administrator locks everyone out permanently, and
+    there is no self-service way back.
+    """
+    if body.role_ids is None and body.status is None:
+        raise HTTPException(422, "Nothing to change")
+    if body.status is not None and body.status not in ("active", "suspended"):
+        raise HTTPException(422, "status must be 'active' or 'suspended'")
+
+    with get_pool().connection() as conn:
+        row = _load_membership(conn, ctx.company_id, membership_id)
+        details = {"email": row["email"]}
+
+        losing_admin = (
+            (body.status == "suspended")
+            or (body.role_ids is not None
+                and not _grants_user_management(conn, ctx.company_id, body.role_ids))
+        )
+        if losing_admin and _other_admins(conn, ctx.company_id, membership_id) == 0:
+            raise HTTPException(
+                409, "This is the last member who can manage users. Give someone "
+                     "else an administrator role first.")
+
+        if body.role_ids is not None:
+            _validate_role_ids(conn, ctx.company_id, body.role_ids)
+            conn.execute("DELETE FROM membership_roles WHERE membership_id = %s",
+                         (membership_id,))
+            for rid in body.role_ids:
+                conn.execute(
+                    """INSERT INTO membership_roles (membership_id, role_id)
+                       VALUES (%s, %s) ON CONFLICT DO NOTHING""",
+                    (membership_id, rid))
+            details["role_ids"] = list(body.role_ids)
+
+        if body.status is not None:
+            conn.execute("UPDATE memberships SET status = %s WHERE id = %s",
+                         (body.status, membership_id))
+            details["status"] = body.status
+
+        audit(conn, ctx.company_id, ctx.user["id"], "assign", "membership",
+              membership_id, details)
+    return {"ok": True}
+
+
+@router.delete("/members/{membership_id}")
+def remove_member(membership_id: str,
+                  ctx: AuthContext = Depends(require("company", "assign"))):
+    """Remove someone from this company.
+
+    Soft delete: the users row survives untouched, because a person can belong
+    to more than one company and their name is still on the records they filed.
+    The membership is marked removed, which drops them from company_member on
+    their next request.
+    """
+    with get_pool().connection() as conn:
+        row = _load_membership(conn, ctx.company_id, membership_id)
+
+        if str(row["user_id"]) == str(ctx.user["id"]):
+            raise HTTPException(
+                409, "You can't remove yourself. Ask another administrator.")
+        if _other_admins(conn, ctx.company_id, membership_id) == 0:
+            raise HTTPException(
+                409, "This is the last member who can manage users. Give someone "
+                     "else an administrator role first.")
+
+        conn.execute(
+            """UPDATE memberships
+               SET status = 'removed', deleted_at = now()
+               WHERE id = %s AND company_id = %s AND deleted_at IS NULL""",
+            (membership_id, ctx.company_id))
+        conn.execute("DELETE FROM membership_roles WHERE membership_id = %s",
+                     (membership_id,))
+        audit(conn, ctx.company_id, ctx.user["id"], "delete", "membership",
+              membership_id, {"email": row["email"], "name": row["name"]})
+    return {"ok": True}
 
 class InviteIn(BaseModel):
     email: str
