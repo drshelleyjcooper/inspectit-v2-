@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, security
 from ..db import audit, cleanup_user_tokens, get_pool
+from ..presets import BLOCKED_COMBINATIONS
 from ..ratelimit import rate_limit_auth
 
 # Every /auth route is rate-limited per client IP (F3): these are the only
@@ -203,10 +204,37 @@ def accept_invitation(body: AcceptInviteIn):
                  body.name.strip()),
             ).fetchone()
 
+        # Re-check the blocked combination here, not just at invite time: the
+        # membership set can change between issue and accept, and acceptance is
+        # the moment the roles actually land (§2.3). Revoke rather than leave
+        # it pending — a token that can never be accepted is worse than no
+        # token, because the invitee would retry forever.
+        held = conn.execute(
+            """SELECT r.name FROM memberships m
+               JOIN membership_roles mr ON mr.membership_id = m.id
+               JOIN roles r ON r.id = mr.role_id AND r.deleted_at IS NULL
+               WHERE m.company_id = %s AND m.user_id = %s
+                 AND m.deleted_at IS NULL""",
+            (inv["company_id"], user["id"]),
+        ).fetchall()
+        incoming = conn.execute(
+            "SELECT name FROM roles WHERE id = ANY(%s::uuid[])",
+            (list(inv["role_ids"]),),
+        ).fetchall()
+        resulting = {r["name"] for r in held} | {r["name"] for r in incoming}
+        for pair in BLOCKED_COMBINATIONS:
+            if pair <= resulting:
+                conn.execute(
+                    "UPDATE invitations SET status = 'revoked' WHERE id = %s",
+                    (inv["id"],))
+                raise HTTPException(
+                    409, "Holding " + " and ".join(sorted(pair)) + " together "
+                         "needs administrator approval. This invitation has "
+                         "been cancelled — ask an administrator.")
+
         membership = conn.execute(
             """INSERT INTO memberships (company_id, user_id) VALUES (%s, %s)
-               ON CONFLICT (company_id, user_id) DO UPDATE
-                   SET status = 'active', deleted_at = NULL
+               ON CONFLICT (company_id, user_id) DO UPDATE SET status = 'active',deleted_at = NULL
                RETURNING id""",
             (inv["company_id"], user["id"]),
         ).fetchone()
@@ -219,6 +247,5 @@ def accept_invitation(body: AcceptInviteIn):
                      (inv["id"],))
         audit(conn, inv["company_id"], user["id"], "create", "membership",
               membership["id"], {"event": "invitation_accepted"})
-        return {"company_id": str(inv["company_id"]), "user_id": str(user["id"]),
-                "email": inv["email"],
+        return {"company_id": str(inv["company_id"]), "user_id": str(user["id"]), "email": inv["email"],
                 **_token_pair(conn, user["id"])}
