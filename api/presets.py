@@ -39,6 +39,13 @@ VEH_VIEW, PROP_VIEW, PROJ_VIEW = "Vehicle Viewer", "Property Viewer", "Project V
 VIEWER = "Viewer"
 ALL_ROLES = [ADMIN, MANAGER, VEH_MGR, PROP_MGR, PROJ_MGR, VEH_INSP, PROP_INSP,
              VEH_MAINT, PROP_MAINT, VEH_VIEW, PROP_VIEW, PROJ_VIEW, VIEWER]
+             
+   # Pairs a DOMAIN manager may not assemble from two narrower grants (§2.3).
+# Company Administrator and Manager (company:admin holders) are exempt.
+BLOCKED_COMBINATIONS = [
+    {VEH_INSP, VEH_MAINT},
+    {PROP_INSP, PROP_MAINT},
+]          
 
 ROLE_PRESETS = [
     {
