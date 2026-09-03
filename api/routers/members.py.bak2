@@ -313,12 +313,9 @@ def remove_member(membership_id: str,
                 409, "This is the last member who can manage users. Give someone "
                      "else an administrator role first.")
 
-        # deleted_at alone is the removal signal: list_members and
-        # company_member both filter on it, so status stays within whatever
-        # values the column's constraint allows.
         conn.execute(
             """UPDATE memberships
-               SET deleted_at = now(), updated_at = now()
+               SET status = 'removed', deleted_at = now()
                WHERE id = %s AND company_id = %s AND deleted_at IS NULL""",
             (membership_id, ctx.company_id))
         conn.execute("DELETE FROM membership_roles WHERE membership_id = %s",

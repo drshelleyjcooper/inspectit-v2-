@@ -156,8 +156,8 @@ def test_role_presets_seeded(client):
                    headers=_auth(STATE["admin"]))
     assert r.status_code == 200
     roles = {x["name"]: x for x in r.json()}
-    assert len([x for x in r.json() if x["is_preset"]]) == 8
-    assert roles["Property Inspector"]["scope"] == "assigned"
+    assert len([x for x in r.json() if x["is_preset"]]) == 13
+    assert roles["Property Inspector"]["scope"] == "company"
     assert roles["Viewer"]["scope"] == "company"
     STATE["prop_inspector_role"] = roles["Property Inspector"]["id"]
 
@@ -244,8 +244,11 @@ def test_inspector_permissions_and_scoping(client):
                              "subject_id": STATE["prop_uuid"],
                              "duty": "inspection"}).status_code == 403
 
-    # Assigned-only scope: sees nothing until assigned.
-    assert client.get(f"/companies/{cid}/properties", headers=h).json() == []
+    # Company scope since v2.1: every property is visible without assignment.
+    # Assigned scope meant an inspector signed in to an empty screen, because
+    # collection sync is unavailable to assigned-scope roles.
+    visible = client.get(f"/companies/{cid}/properties", headers=h).json()
+    assert {p["property_id"] for p in visible} == {"UNIT-100", "UNIT-200"}
 
     r = client.post(f"/companies/{cid}/assignments", headers=_auth(STATE["admin"]),
                     json={"user_id": STATE["inspector_uid"],
@@ -255,7 +258,8 @@ def test_inspector_permissions_and_scoping(client):
     assert r.status_code == 200, r.text
 
     visible = client.get(f"/companies/{cid}/properties", headers=h).json()
-    assert len(visible) == 1 and visible[0]["property_id"] == "UNIT-100"
+    # An assignment neither widens nor narrows a company-scoped role.
+    assert {p["property_id"] for p in visible} == {"UNIT-100", "UNIT-200"}
 
 
 def test_outsider_cannot_touch_company(client):
@@ -297,3 +301,79 @@ def test_refresh_rotation(client):
     assert client.post("/auth/refresh",
                        json={"refresh_token": r2.json()["refresh_token"]}
                        ).status_code == 200
+
+# Append to tests/test_phase1.py. Runs on main against the eight-role model --
+# no v2.1 dependencies, no new fixtures, no imports beyond what that file has.
+#
+# Expect RED before the fix and GREEN after. If it's green on unpatched main,
+# something else changed and the fix may not be the right one.
+#
+# The bug: remove_member sets deleted_at; accept_invitation's
+#   ON CONFLICT (company_id, user_id) DO UPDATE SET status = 'active'
+# revives `status` and leaves deleted_at populated. Every downstream query --
+# company_member, list_members, _other_admins -- filters deleted_at IS NULL, so
+# the person accepts, receives a valid token, and is told they are not a member
+# on every request. Nothing surfaces to the administrator: create_invitation's
+# duplicate check also filters deleted_at IS NULL, so the re-invite looks fine.
+#
+# Fix (api/routers/auth.py, accept_invitation):
+#     ON CONFLICT (company_id, user_id) DO UPDATE
+#         SET status = 'active', deleted_at = NULL
+
+
+def test_removed_member_can_be_reinvited(client):
+    """Remove someone, invite them back, and confirm they are actually a member.
+
+    Self-contained on purpose: it creates and disposes of its own person rather
+    than touching STATE["inspector"], which later tests in this file still use.
+    """
+    cid, admin = STATE["cid"], STATE["admin"]
+    role = STATE["prop_inspector_role"]
+    email = "boomerang@example.com"
+
+    # --- join ---------------------------------------------------------------
+    r = client.post(f"/companies/{cid}/invitations", headers=_auth(admin),
+                    json={"email": email, "role_ids": [role]})
+    assert r.status_code == 200, r.text
+    r = client.post("/auth/invitations/accept",
+                    json={"token": r.json()["token"], "name": "Bo Merang",
+                          "password": "comebacksoon1"})
+    assert r.status_code == 200, r.text
+
+    members = client.get(f"/companies/{cid}/members", headers=_auth(admin)).json()
+    mid = next(m["membership_id"] for m in members if m["email"] == email)
+
+    # --- leave --------------------------------------------------------------
+    r = client.delete(f"/companies/{cid}/members/{mid}", headers=_auth(admin))
+    assert r.status_code == 200, r.text
+    members = client.get(f"/companies/{cid}/members", headers=_auth(admin)).json()
+    assert not any(m["email"] == email for m in members), "still listed"
+
+    # --- come back ----------------------------------------------------------
+    r = client.post(f"/companies/{cid}/invitations", headers=_auth(admin),
+                    json={"email": email, "role_ids": [role]})
+    assert r.status_code == 200, f"removed member can't be re-invited: {r.text}"
+
+    # The user row survived the removal, so this is the existing-account path:
+    # the invitee confirms their current password rather than setting a new one.
+    r = client.post("/auth/invitations/accept",
+                    json={"token": r.json()["token"],
+                          "password": "comebacksoon1"})
+    assert r.status_code == 200, r.text
+    back = r.json()["access_token"]
+
+    # --- and can actually use the account -----------------------------------
+    # This is the assertion that fails before the fix. Everything above passes
+    # on unpatched main: the invite is accepted and a valid token comes back.
+    me = client.get("/me", headers=_auth(back))
+    assert me.status_code == 200, me.text
+    assert any(m["company_id"] == cid for m in me.json().get("memberships", [])), \
+        "accepted the invitation and got a token, but isn't a member"
+
+    # The membership was reused, not duplicated.
+    members = client.get(f"/companies/{cid}/members", headers=_auth(admin)).json()
+    rows = [m for m in members if m["email"] == email]
+    assert len(rows) == 1, f"expected one membership, got {len(rows)}"
+    assert rows[0]["status"] == "active"
+    assert {r_["name"] for r_ in rows[0]["roles"]} == {"Property Inspector"}
+    

@@ -79,9 +79,14 @@ def test_permissions(client):
     assert client.put(f"/companies/{cid}/collections/vehicles",
                       headers=_auth(STATE["viewer"]),
                       json={"data": []}).status_code == 403
-    # Property Inspector: assigned scope -> blob sync denied even for view.
+    # Property Inspector: company scope since v2.1, so blob sync works. Under
+    # assigned scope this was a 403 and an inspector signed in to nothing.
     assert client.get(f"/companies/{cid}/collections/properties",
-                      headers=_auth(STATE["inspector"])).status_code == 403
+                      headers=_auth(STATE["inspector"])).status_code == 200
+    # Read, not write: no create/edit on properties.
+    assert client.put(f"/companies/{cid}/collections/properties",
+                      headers=_auth(STATE["inspector"]),
+                      json={"data": []}).status_code == 403
     # profile: any member may GET; only company:edit may PUT.
     client.put(f"/companies/{cid}/collections/profile",
                headers=_auth(STATE["admin"]), json={"data": {"company": "SyncCo"}})

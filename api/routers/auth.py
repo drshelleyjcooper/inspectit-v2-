@@ -205,7 +205,8 @@ def accept_invitation(body: AcceptInviteIn):
 
         membership = conn.execute(
             """INSERT INTO memberships (company_id, user_id) VALUES (%s, %s)
-               ON CONFLICT (company_id, user_id) DO UPDATE SET status = 'active'
+               ON CONFLICT (company_id, user_id) DO UPDATE
+                   SET status = 'active', deleted_at = NULL
                RETURNING id""",
             (inv["company_id"], user["id"]),
         ).fetchone()
@@ -219,4 +220,5 @@ def accept_invitation(body: AcceptInviteIn):
         audit(conn, inv["company_id"], user["id"], "create", "membership",
               membership["id"], {"event": "invitation_accepted"})
         return {"company_id": str(inv["company_id"]), "user_id": str(user["id"]),
+                "email": inv["email"],
                 **_token_pair(conn, user["id"])}

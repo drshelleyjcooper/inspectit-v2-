@@ -82,6 +82,7 @@
   button.danger:hover { background: var(--defect); color: #fff; border-color: var(--defect); }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
   .hidden { display: none !important; }
+  .perm-hidden { display: none !important; }
 
   /* ---------- brand mark ---------- */
   .logo { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; }
@@ -430,6 +431,15 @@
   .user-list .rm { border: none; background: none; color: var(--muted); cursor: pointer; padding: 6px; border-radius: 7px; }
   .user-list .rm:hover { background: #fdecea; color: var(--defect); }
   .add-user-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end; }
+  .perm-diag { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .perm-diag summary { cursor: pointer; font-size: .8rem; color: var(--muted); }
+  .perm-diag pre { margin: 10px 0 0; padding: 12px; background: #f6f8fb; border-radius: 8px;
+    font-size: .72rem; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  .name-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; margin-bottom: 8px; }
+  @media (max-width: 520px) {
+    .add-user-row { grid-template-columns: 1fr; }
+    .name-row { grid-template-columns: 1fr; }
+  }
 
   /* ---------- responsive ---------- */
   @media (max-width: 820px) {
@@ -470,12 +480,15 @@
         <input type="text" id="loginCompany" autocomplete="organization" placeholder="e.g. Acme Property Group"></label>
       <label class="field hidden" id="nameRow"><span>Your name</span>
         <input type="text" id="loginName" autocomplete="name" placeholder="e.g. Jane Smith"></label>
-      <label class="field"><span>Email</span>
+      <label class="field" id="emailRow"><span>Email</span>
         <input type="email" id="loginEmail" autocomplete="email" placeholder="you@company.com"></label>
       <label class="field"><span>Password</span>
         <input type="password" id="loginPass" autocomplete="current-password" placeholder="Your password"></label>
       <label class="field hidden" id="confirmRow"><span>Confirm password</span>
         <input type="password" id="loginConfirm" autocomplete="new-password" placeholder="Re-enter password"></label>
+
+      <label class="field hidden" id="serverRow"><span>Server address</span>
+        <input type="text" id="loginApi" spellcheck="false" placeholder="https://your-inspectit-server"></label>
 
       <div class="captcha-row">
         <div class="captcha-q">
@@ -512,13 +525,13 @@
       <a data-nav="home" class="active">
         <svg viewBox="0 0 24 24" fill="none"><path d="M3 11l9-7 9 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 10v9h14v-9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
         Home</a>
-      <a data-nav="vehicles">
+      <a data-nav="vehicles" data-perm-tab="vehicles">
         <svg viewBox="0 0 24 24" fill="none"><path d="M3 13l2-5a2 2 0 011.9-1.3h10.2A2 2 0 0119 8l2 5v5h-3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 13v5h3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.5" cy="17.5" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="16.5" cy="17.5" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>
         Vehicles</a>
-      <a data-nav="properties">
+      <a data-nav="properties" data-perm-tab="properties">
         <svg viewBox="0 0 24 24" fill="none"><path d="M4 10.5L12 4l8 6.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 9.5V20h12V9.5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M10 20v-5h4v5" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
         Properties</a>
-      <a data-nav="projects">
+      <a data-nav="projects" data-perm-tab="projects">
         <svg viewBox="0 0 24 24" fill="none"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 4v3M16 4v3M4 10h16" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
         Projects</a>
     </nav>
@@ -606,11 +619,11 @@
 
         <!-- bottom action buttons -->
         <div class="footer-actions">
-          <button class="ghost" id="btnEditProfile">Edit profile</button>
+          <button class="ghost" id="btnEditProfile" data-perm-users>Edit profile</button>
           <button class="ghost hidden" id="btnChangePw">Change password</button>
-          <button class="ghost" id="btnUsers">Users</button>
-          <button class="ghost" id="btnExport">Export backup</button>
-          <button class="ghost" id="btnImport">Import backup</button>
+          <button class="ghost" id="btnUsers">Users &amp; roles</button>
+          <button class="ghost" id="btnExport" data-perm="company:admin">Export backup</button>
+          <button class="ghost" id="btnImport" data-perm="company:admin">Import backup</button>
           <button class="ghost" id="btnCloud">Cloud sync</button>
           <span class="spacer"></span>
           <button class="danger" id="btnLogout">Log out</button>
@@ -658,6 +671,426 @@ const K = { account: "inspectit.account", session: "inspectit.session", profile:
 const getJSON = (k, fallback) => { try { const v = store.get(k); return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } };
 const setJSON = (k, v) => store.set(k, JSON.stringify(v));
 
+/* ==================== ROLES & PERMISSIONS ====================
+   Source of truth for the matrix: User_Roles_Chart.pdf.
+   Module + action keys mirror the backend (api/presets.py, roles.permissions),
+   so a permission blob from /me drops straight in.
+
+   The server is the real enforcement point. This layer decides what a signed-in
+   member is *shown*; every write still has to pass the API's own check.
+
+   Signed out (local-only / offline-first use) the app stays a single-user tool
+   and everything is permitted — that's the pre-1.0 behaviour, unchanged. */
+
+const PERM_ACTIONS = ["view", "create", "edit", "delete", "print", "assign", "admin"];
+
+const VEHICLE_MODULES  = ["vehicles", "vehicle_inspections", "vehicle_maintenance",
+                          "vehicle_repairs", "vehicle_warranties"];
+const PROPERTY_MODULES = ["properties", "property_inspections", "property_maintenance",
+                          "property_repairs", "property_warranties"];
+const ALL_MODULES = VEHICLE_MODULES.concat(PROPERTY_MODULES, ["projects"]);
+
+/* Build a { module: [actions] } blob from a module list + action list. */
+function permBlob(modules, actions, extra) {
+  const out = {};
+  modules.forEach(m => { out[m] = actions.slice(); });
+  if (extra) Object.keys(extra).forEach(m => { out[m] = extra[m].slice(); });
+  return out;
+}
+
+const FULL    = ["view", "create", "edit", "delete", "print", "assign"];
+const NO_DEL  = ["view", "create", "edit", "print", "assign"];
+const INSPECT = ["view", "create", "edit", "print"];
+const READ    = ["view", "print"];
+
+/* `grants` drives "can this person grant that role?" — rank can't express it,
+   because the three domain managers are siblings at one tier: a Property
+   Manager must not reach a Vehicle Inspector. `viewerGrants` folds in only when
+   the server says this membership has can_grant_viewers.
+   Authoritative source: USER-ROLES-SPEC v2.0 §4.1 and §4.2. */
+const ROLE_PRESETS = {
+  company_admin: {
+    id: "company_admin", name: "Company Administrator", rank: 100, scope: "company",
+    grants: ["company_admin", "manager", "vehicle_manager", "property_manager",
+             "project_manager", "vehicle_inspector", "property_inspector",
+             "vehicle_maintenance", "property_maintenance", "vehicle_viewer",
+             "property_viewer", "project_viewer", "viewer"],
+    viewerGrants: [],
+    blurb: "Everything, including user sign-ins, roles and deletions.",
+    permissions: permBlob(ALL_MODULES, FULL, { company: FULL.concat(["admin"]) })
+  },
+  manager: {
+    id: "manager", name: "Manager", rank: 80, scope: "company",
+    /* Not the company-wide Viewer: that one is the administrator's alone (§2.5). */
+    grants: ["vehicle_manager", "property_manager", "project_manager",
+             "vehicle_inspector", "property_inspector", "vehicle_maintenance",
+             "property_maintenance", "vehicle_viewer", "property_viewer",
+             "project_viewer"],
+    viewerGrants: [],
+    blurb: "All vehicles, properties and projects. Adds users. Can't delete records.",
+    permissions: permBlob(ALL_MODULES, NO_DEL,
+                          { company: ["view", "edit", "print", "assign", "admin"] })
+  },
+  vehicle_manager: {
+    id: "vehicle_manager", name: "Vehicle Manager", rank: 60, scope: "company",
+    grants: ["vehicle_inspector", "vehicle_maintenance"],
+    viewerGrants: ["vehicle_viewer"],
+    blurb: "Vehicles only. Adds inspectors and maintenance. Can't delete.",
+    permissions: permBlob(VEHICLE_MODULES, NO_DEL, { company: ["assign"] })
+  },
+  property_manager: {
+    id: "property_manager", name: "Property Manager", rank: 60, scope: "company",
+    grants: ["property_inspector", "property_maintenance"],
+    viewerGrants: ["property_viewer"],
+    blurb: "Properties and their projects. Adds inspectors and maintenance. Can't delete.",
+    permissions: permBlob(PROPERTY_MODULES.concat(["projects"]), NO_DEL,
+                          { company: ["assign"] })
+  },
+  project_manager: {
+    id: "project_manager", name: "Project Manager", rank: 50, scope: "company",
+    /* Nothing sits below it in its own domain, so it adds nobody unless an
+       administrator turns on viewer grants. */
+    grants: [], viewerGrants: ["project_viewer"],
+    blurb: "Projects and their parent properties. Reads properties for context.",
+    permissions: permBlob(["projects"], NO_DEL,
+                          { properties: ["view"], company: ["assign"] })
+  },
+  vehicle_inspector: {
+    id: "vehicle_inspector", name: "Vehicle Inspector", rank: 30, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Inspections on any company vehicle. No maintenance, no delete.",
+    permissions: { vehicles: ["view"], vehicle_inspections: INSPECT }
+  },
+  property_inspector: {
+    id: "property_inspector", name: "Property Inspector", rank: 30, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Inspections on any company property. No maintenance, no delete.",
+    permissions: { properties: ["view"], property_inspections: INSPECT }
+  },
+  vehicle_maintenance: {
+    id: "vehicle_maintenance", name: "Vehicle Maintenance", rank: 30, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "The maintenance scheduler and spend log for vehicles.",
+    permissions: { vehicles: ["view"], vehicle_maintenance: INSPECT }
+  },
+  property_maintenance: {
+    id: "property_maintenance", name: "Property Maintenance", rank: 30, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "The maintenance scheduler and spend log for properties.",
+    permissions: { properties: ["view"], property_maintenance: INSPECT }
+  },
+  vehicle_viewer: {
+    id: "vehicle_viewer", name: "Vehicle Viewer", rank: 10, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Reads and prints everything on the vehicle side. Changes nothing.",
+    permissions: permBlob(VEHICLE_MODULES, READ)
+  },
+  property_viewer: {
+    id: "property_viewer", name: "Property Viewer", rank: 10, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Reads and prints everything on the property side. Changes nothing.",
+    permissions: permBlob(PROPERTY_MODULES, READ)
+  },
+  project_viewer: {
+    id: "project_viewer", name: "Project Viewer", rank: 10, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Reads and prints projects. Changes nothing.",
+    permissions: permBlob(["projects"], READ, { properties: ["view"] })
+  },
+  viewer: {
+    id: "viewer", name: "Viewer", rank: 10, scope: "company",
+    grants: [], viewerGrants: [],
+    blurb: "Reads and prints everything. Changes nothing.",
+    permissions: permBlob(ALL_MODULES, READ)
+  }
+};
+
+/* Pairs a domain manager may not assemble out of two narrower grants (§2.3).
+   Company Administrator and Manager — the company:admin holders — are exempt. */
+const BLOCKED_COMBINATIONS = [
+  ["vehicle_inspector", "vehicle_maintenance"],
+  ["property_inspector", "property_maintenance"]
+];
+
+const ROLE_ORDER = ["company_admin", "manager", "vehicle_manager", "property_manager",
+                    "project_manager", "vehicle_inspector", "property_inspector",
+                    "vehicle_maintenance", "property_maintenance",
+                    "vehicle_viewer", "property_viewer", "project_viewer", "viewer"];
+
+/* "Company Administrator" / "company-admin" / "COMPANY_ADMIN" -> "company_admin" */
+function roleKey(name) {
+  const s = String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  if (!s) return null;
+  if (s === "company_administrator" || s === "administrator" || s === "admin") return "company_admin";
+  return ROLE_PRESETS[s] ? s : null;
+}
+
+/* Which nav tab needs which modules. */
+const TAB_MODULES = {
+  home: null,
+  vehicles: VEHICLE_MODULES,
+  properties: PROPERTY_MODULES,
+  projects: ["projects"]
+};
+
+/* ---------- the signed-in member's effective permissions ---------- */
+
+/* Roles come from /me and are cached in cloudCfg so they survive going offline. */
+function myRoleIds() {
+  const c = cloudCfg();
+  if (!c || !Array.isArray(c.roles) || !c.roles.length) return [];
+  return c.roles.map(roleKey).filter(Boolean);
+}
+
+/* Signed out = local single-user mode = no gating, which is the pre-1.0
+   behaviour and correct for a personal offline copy.
+
+   Signed in but with no role we can read is a different thing entirely, and it
+   used to fall through to the same "allow everything". That hid a real problem:
+   an invited inspector would see the whole app. It still doesn't lock anyone
+   out — the server enforces the real permissions either way — but it now says
+   so on screen rather than looking like it worked. */
+function permsActive() { return cloudSignedIn() && myRoleIds().length > 0; }
+
+function permsUnknown() { return cloudSignedIn() && myRoleIds().length === 0; }
+
+function renderPermWarning() {
+  const host = $("view-home");
+  if (!host) return;
+  let el = $("permWarn");
+  if (!permsUnknown()) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("p");
+    el.id = "permWarn";
+    el.className = "form-error";
+    el.style.cssText = "margin:12px 0;padding:10px 12px;background:#fff6e5;" +
+      "border-radius:8px;color:#8a5300;font-size:.85rem;";
+    host.insertBefore(el, host.firstChild);
+  }
+  el.textContent = "Signed in, but the server didn't return a role for this account — " +
+    "so nothing is being hidden. What you can actually change is still decided by the " +
+    "server. Open Users & roles \u2192 Server details to see what it sent.";
+}
+
+/* Union across every role held. The server's own blob wins when it sent one. */
+function permSet() {
+  const c = cloudCfg();
+  const merged = {};
+  const add = blob => {
+    if (!blob) return;
+    Object.keys(blob).forEach(m => {
+      merged[m] = merged[m] || [];
+      (blob[m] || []).forEach(a => { if (merged[m].indexOf(a) === -1) merged[m].push(a); });
+    });
+  };
+  if (c && c.permissions && Object.keys(c.permissions).length) add(c.permissions);
+  else myRoleIds().forEach(id => add(ROLE_PRESETS[id].permissions));
+  return merged;
+}
+
+/* can("vehicle_repairs", "edit") */
+function can(module, action) {
+  if (!permsActive()) return true;
+  const acts = permSet()[module];
+  if (!acts) return false;
+  if (acts.indexOf(action) !== -1) return true;
+  /* presets grant create and edit together, so edit implies create */
+  if (action === "create") return acts.indexOf("edit") !== -1;
+  return false;
+}
+
+function canTab(tab) {
+  if (!permsActive()) return true;
+  const mods = TAB_MODULES[tab];
+  if (!mods) return true;
+  return mods.some(m => can(m, "view"));
+}
+
+/* Role ids an address already holds here, and any waiting on a pending invite.
+   Pending ones count: two invitations sent before either is accepted would
+   otherwise slip a blocked combination through. */
+function memberRoleIdsByEmail(members, rmap, email) {
+  const want = String(email || "").toLowerCase();
+  const hit = (members || []).find(m =>
+    String(m.email || (m.user && m.user.email) || "").toLowerCase() === want);
+  return hit ? roleLabels(hit, rmap).map(r => roleKey(r)).filter(Boolean) : [];
+}
+
+function pendingRoleIdsByEmail(invites, rmap, email) {
+  const want = String(email || "").toLowerCase();
+  const out = [];
+  (invites || []).forEach(i => {
+    if (String(i.email || i.invitee_email || "").toLowerCase() !== want) return;
+    if (i.status && i.status !== "pending") return;
+    roleLabels(i, rmap).map(r => roleKey(r)).filter(Boolean)
+      .forEach(id => { if (out.indexOf(id) === -1) out.push(id); });
+  });
+  return out;
+}
+
+/* Highest-ranked role held — used for display ordering only. Granting no
+   longer derives from rank; see grantableRoleIds(). */
+function myTopRole() {
+  const ids = myRoleIds();
+  if (!ids.length) return ROLE_PRESETS.company_admin;
+  return ids.map(id => ROLE_PRESETS[id]).sort((a, b) => b.rank - a.rank)[0];
+}
+
+/* The server decides this per membership; the preset is the offline fallback. */
+function myCanGrantViewers() {
+  const c = cloudCfg();
+  if (c && typeof c.canGrantViewers === "boolean") return c.canGrantViewers;
+  return false;
+}
+
+/* Union across every role held: someone who is both Vehicle and Property
+   Manager may add either domain's people. */
+function grantableRoleIds() {
+  if (!permsActive()) return ROLE_ORDER.slice();
+  const withViewers = myCanGrantViewers();
+  const out = [];
+  myRoleIds().forEach(id => {
+    const r = ROLE_PRESETS[id];
+    if (!r) return;
+    (r.grants || []).forEach(g => { if (out.indexOf(g) === -1) out.push(g); });
+    if (withViewers) (r.viewerGrants || []).forEach(g => {
+      if (out.indexOf(g) === -1) out.push(g);
+    });
+  });
+  return ROLE_ORDER.filter(id => out.indexOf(id) !== -1);
+}
+
+function canManageUsers() {
+  if (!permsActive()) return true;
+  return grantableRoleIds().length > 0;
+}
+
+function canGrantRole(targetId) {
+  if (!permsActive()) return true;
+  return grantableRoleIds().indexOf(targetId) !== -1;
+}
+
+/* You may not edit or remove someone holding a role you couldn't have issued.
+   Mirrors _assert_may_manage on the server — without it, a Vehicle Manager
+   could rewrite the administrator's roles. */
+function canManageMember(roleIds) {
+  if (!permsActive()) return true;
+  if (can("company", "admin")) return true;
+  const mine = grantableRoleIds();
+  return (roleIds || []).every(id => !id || mine.indexOf(id) !== -1);
+}
+
+/* Which of `targetIds` this member is barred from adding to someone who
+   already holds `heldIds` (§2.3). Returns [] when nothing is blocked. */
+function blockedCombination(heldIds, targetIds) {
+  if (!permsActive()) return [];
+  if (can("company", "admin")) return [];
+  const after = (heldIds || []).concat(targetIds || []);
+  const hit = BLOCKED_COMBINATIONS.find(pair =>
+    pair.every(r => after.indexOf(r) !== -1));
+  return hit || [];
+}
+
+/* ---------- DOM gating ----------
+   Mark controls up once:
+     <button data-perm="vehicle_repairs:edit">New repair ticket</button>
+     <button data-perm="vehicles:delete" data-perm-mode="disable">Delete</button>
+     <a data-perm-tab="projects">Projects</a>
+   then call applyPerms() after each render. */
+function applyPerms(root) {
+  const scope = root || document;
+  renderPermWarning();
+  scope.querySelectorAll("[data-perm]").forEach(el => {
+    const spec = el.getAttribute("data-perm").split(":");
+    gateEl(el, can(spec[0], spec[1] || "view"), el.getAttribute("data-perm-mode"));
+  });
+  scope.querySelectorAll("[data-perm-tab]").forEach(el => {
+    gateEl(el, canTab(el.getAttribute("data-perm-tab")), "hide");
+  });
+  scope.querySelectorAll("[data-perm-users]").forEach(el => {
+    gateEl(el, canManageUsers(), "hide");
+  });
+}
+
+function gateEl(el, allowed, mode) {
+  if (allowed) {
+    el.classList.remove("perm-hidden");
+    if (el.dataset.permOff) { el.disabled = false; delete el.dataset.permOff; el.removeAttribute("title"); }
+    el.removeAttribute("aria-disabled");
+    return;
+  }
+  if (mode === "disable") {
+    el.disabled = true;
+    el.dataset.permOff = "1";
+    el.setAttribute("aria-disabled", "true");
+    el.title = "Your role doesn't include this.";
+  } else {
+    el.classList.add("perm-hidden");
+  }
+}
+
+/* Route guard — a hand-typed or remembered view can't get past the role. */
+function guardView(view) {
+  if (canTab(view)) return true;
+  toast("Your role doesn't include " + (TITLES[view] || view) + ".");
+  return false;
+}
+
+/* Pull the current member's roles from the server. Called on sign-in and on
+   every app open so a role change lands without needing a re-login. */
+async function permsRefresh() {
+  const c = cloudCfg();
+  if (!c || !c.access) return;
+  try {
+    const r = await cloudFetch("/me", {});
+    if (!r.ok) return;
+    const me = await r.json();
+    const m = (me.memberships || []).find(x => x.company_id === c.company) || (me.memberships || [])[0];
+    if (!m) return;
+    const cur = cloudCfg();
+    if (!cur) return;
+    cur.userId = me.id || me.user_id || cur.userId;
+    cur.userName = me.name || cur.userName;
+    cur.roles = permReadRoles(m);
+    cur.permissions = permReadBlob(m);
+    cur.rawMembership = m;          // kept for the diagnostics panel
+    /* Per-membership override (§2.5) — the only permission that isn't
+       derived from the role blob. */
+    if (typeof m.can_grant_viewers === "boolean") cur.canGrantViewers = m.can_grant_viewers;
+    cur.companyName = m.company_name || cur.companyName;
+    cloudSaveCfg(cur);
+    applyPerms();
+  } catch (_) { /* offline — keep the cached roles */ }
+}
+
+/* The API may hand back roles as strings, as objects, or as a permission blob.
+   Read whatever shape arrives rather than guessing one. */
+function permReadRoles(m) {
+  const raw = m.roles || m.role_names || (m.role ? [m.role] : []);
+  return (Array.isArray(raw) ? raw : [raw])
+    .map(r => (typeof r === "string" ? r : (r && (r.name || r.id))))
+    .filter(Boolean);
+}
+
+function permReadBlob(m) {
+  if (m.permissions && typeof m.permissions === "object" && !Array.isArray(m.permissions))
+    return m.permissions;
+  const roles = m.roles;
+  if (Array.isArray(roles) && roles.length && typeof roles[0] === "object") {
+    const merged = {};
+    roles.forEach(r => {
+      const p = r.permissions || {};
+      Object.keys(p).forEach(mod => {
+        merged[mod] = merged[mod] || [];
+        (p[mod] || []).forEach(a => { if (merged[mod].indexOf(a) === -1) merged[mod].push(a); });
+      });
+    });
+    if (Object.keys(merged).length) return merged;
+  }
+  return null;
+}
+
+
 /* ==================== CLOUD SYNC (phase 2) ====================
    Mirrors each data collection to the Inspectit API for multi-device use.
    localStorage stays the working cache — the app is fully usable signed out,
@@ -668,6 +1101,20 @@ const CLOUD_KEY = "inspectit.cloud";                 // local-only (never synced
 const CLOUD_DEFAULT_API = (typeof location !== "undefined" && /^https?:$/.test(location.protocol))
   ? location.origin
   : "http://127.0.0.1:8100";   // same-origin in the browser; falls back for file:// testing
+/* The server address, remembered between sessions. Served over http the app and
+   the API share an origin and this is never needed; opened as a local file there
+   is no origin to infer, so the sign-in screen asks for it. */
+const API_KEY = "inspectit.api";                     // local-only (never synced)
+const RUNNING_LOCAL_FILE = !(typeof location !== "undefined" && /^https?:$/.test(location.protocol));
+function apiBase() {
+  const saved = store.get(API_KEY);
+  if (saved) return saved;
+  const c = cloudCfg();
+  if (c && c.api) return c.api;
+  return CLOUD_DEFAULT_API;
+}
+function apiSave(url) { if (url) store.set(API_KEY, url); }
+
 const CLOUD_SYNC_NAMES = Object.keys(K).filter(n => n !== "account" && n !== "session" && n !== "users");
 const CLOUD_FULLKEY = {};                            // "vehicles" -> "inspectit.vehicles"
 CLOUD_SYNC_NAMES.forEach(n => { CLOUD_FULLKEY[n] = K[n]; });
@@ -847,7 +1294,11 @@ async function cloudLoginRequest(api, path, body) {
   try {
     r = await fetch(api + path, { method: "POST",
       headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  } catch (_) { throw new Error("Couldn't reach the server at " + api); }
+  } catch (_) {
+    throw new Error("Couldn't reach the server at " + api +
+      ". Check the address is right and the server is running. " +
+      "You can keep working signed out — your data stays in this browser.");
+  }
   let out = null; try { out = await r.json(); } catch (_) {}
   if (!r.ok) {
     const msg = out && out.detail && (typeof out.detail === "string" ? out.detail : JSON.stringify(out.detail));
@@ -864,15 +1315,21 @@ async function cloudSignIn(api, email, password) {
     throw new Error("This account isn't a member of any company yet.");
   const m = me.memberships[0];   // v1: first membership
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
-                 company: m.company_id, companyName: m.company_name, meta: {}, pending: {} });
+                 company: m.company_id, companyName: m.company_name,
+                 userId: me.id || me.user_id || null, userName: me.name || null,
+                 roles: permReadRoles(m), permissions: permReadBlob(m),
+                 meta: {}, pending: {} });
   await cloudSyncNow(true);
 }
 
 async function cloudCreateAccount(api, companyName, yourName, email, password) {
   const t = await cloudLoginRequest(api, "/auth/signup",
     { company_name: companyName, name: yourName, email: email, password: password });
+  /* the account creator is the company's first administrator */
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
-                 company: t.company_id, companyName: companyName, meta: {}, pending: {} });
+                 company: t.company_id, companyName: companyName,
+                 userName: yourName, roles: ["Company Administrator"], permissions: null,
+                 meta: {}, pending: {} });
   await cloudSyncNow(true);
 }
 
@@ -934,18 +1391,92 @@ function showScreen(name) {
 
 /* ---------- login (real account: signup/signin hit the Inspectit API and
    turn cloud sync on automatically — no separate "Cloud sync" step needed) */
-let loginMode = "create";   // "create" | "signin" — toggled by the link below
+/* An invitation link lands here: ?invite=<token>. The invitee sets a name and
+   password, the token is redeemed, and they're signed straight in. */
+const INVITE_TOKEN = (function () {
+  try { return new URLSearchParams(location.search).get("invite") || ""; }
+  catch (_) { return ""; }
+})();
+
+/* Redeem the token, in whatever shape this build of the endpoint declares. */
+async function acceptInvitation(token, name, password) {
+  const spec = await apiSpec();
+  const hit = specFind(spec, /invitations\/accept$/, "post");
+  const props = hit ? specBodyProps(spec, hit.op) : null;
+  const path = hit ? hit.key : "/auth/invitations/accept";
+
+  let body;
+  if (!props) {
+    body = { token: token, name: name, password: password };
+  } else {
+    const has = n => props.indexOf(n) !== -1;
+    body = {};
+    if (has("token")) body.token = token;
+    else if (has("invite_token")) body.invite_token = token;
+    else if (has("invitation_token")) body.invitation_token = token;
+    else if (has("code")) body.code = token;
+    else if (has("invitation_id")) body.invitation_id = token;
+    else body.token = token;
+
+    if (has("password")) body.password = password;
+    if (name) {
+      if (has("name")) body.name = name;
+      else if (has("full_name")) body.full_name = name;
+      else if (has("first_name")) {
+        const bits = name.split(/\s+/);
+        body.first_name = bits.shift();
+        if (has("last_name")) body.last_name = bits.join(" ");
+      }
+    }
+  }
+
+  const r = await fetch(apiBase().replace(/\/+$/, "") + path, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!r.ok) throw new Error(await apiErrorText(r, "Couldn't accept that invitation"));
+  let out = null; try { out = await r.json(); } catch (_) {}
+  return out || {};
+}
+
+let loginMode = INVITE_TOKEN ? "accept" : "create";   // "create" | "signin" | "accept"
+
+/* An invitation can land on an email that already has an Inspectit account —
+   people belong to more than one company. The server won't let a link set a new
+   password on an existing login, so the form switches to confirming the one they
+   already have. */
+let acceptExisting = false;
+
+function showAcceptExisting(message) {
+  acceptExisting = true;
+  $("loginSubtitle").textContent =
+    "This email already has an Inspectit account. Enter its existing password to join.";
+  $("nameRow").classList.add("hidden");
+  $("confirmRow").classList.add("hidden");
+  $("loginPass").value = "";
+  $("loginPass").setAttribute("autocomplete", "current-password");
+  $("loginSubmit").textContent = "Join company";
+  $("loginError").textContent = message ||
+    "That email already has an account — confirm its password to accept the invitation.";
+  setTimeout(() => $("loginPass").focus(), 60);
+}
 function renderLogin() {
   const c = cloudCfg();
-  if (c && c.email) loginMode = "signin";
+  if (c && c.email && loginMode !== "accept") loginMode = "signin";
+  const accepting = loginMode === "accept";
   const creating = loginMode === "create";
-  $("loginSubtitle").textContent = creating
-    ? "Create your company account — your data syncs automatically."
-    : "Sign in to your account.";
+  $("loginSubtitle").textContent = accepting
+    ? "You've been invited. Set a password to finish setting up your sign-in."
+    : creating
+      ? "Create your company account — your data syncs automatically."
+      : "Sign in to your account.";
   $("companyRow").classList.toggle("hidden", !creating);
-  $("nameRow").classList.toggle("hidden", !creating);
-  $("confirmRow").classList.toggle("hidden", !creating);
-  $("loginSubmit").textContent = creating ? "Create account" : "Sign in";
+  $("nameRow").classList.toggle("hidden", !(creating || accepting));
+  $("confirmRow").classList.toggle("hidden", !(creating || accepting));
+  $("emailRow").classList.toggle("hidden", accepting);   // the token carries the email
+  $("loginSubmit").textContent = accepting ? "Accept invitation"
+    : creating ? "Create account" : "Sign in";
+  $("loginModeSwitch").classList.toggle("hidden", accepting);
   $("loginModeSwitch").textContent = creating
     ? "Already have an account? Sign in"
     : "New here? Create a company account";
@@ -954,6 +1485,8 @@ function renderLogin() {
   $("loginEmail").value = (c && c.email) || "";
   $("loginPass").value = "";
   $("loginConfirm").value = "";
+  $("serverRow").classList.toggle("hidden", !RUNNING_LOCAL_FILE);
+  $("loginApi").value = apiBase();
   $("loginError").textContent = "";
   $("loginSubmit").disabled = false;
   newCaptcha();
@@ -976,10 +1509,43 @@ $("loginForm").addEventListener("submit", async e => {
   const name = $("loginName").value.trim();
   const email = $("loginEmail").value.trim();
   const p = $("loginPass").value;
+  const api = RUNNING_LOCAL_FILE
+    ? $("loginApi").value.trim().replace(/\/+$/, "")
+    : apiBase();
 
   if (Number($("capA").value) !== captcha.a + captcha.b) {
     err.textContent = "Security check failed — answer the sum to continue.";
     newCaptcha(); return;
+  }
+  if (!api) { err.textContent = "Enter the address of your Inspectit server."; return; }
+  if (loginMode === "accept") {
+    if (!acceptExisting) {
+      if (!name) { err.textContent = "Enter your name."; return; }
+      if (p !== $("loginConfirm").value) { err.textContent = "Passwords don't match."; return; }
+    }
+    if (p.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
+    const b = $("loginSubmit");
+    const label = b.textContent;
+    b.disabled = true; b.textContent = "Working…";
+    try {
+      const res = await acceptInvitation(INVITE_TOKEN, acceptExisting ? "" : name, p);
+      const who = res.email || (res.user && res.user.email);
+      if (!who) throw new Error("The invitation was accepted but the server didn't say " +
+                                "which email it belongs to. Sign in with your email and this password.");
+      await cloudSignIn(api, who, p);
+      apiSave(api);
+      store.set(K.session, "1");
+      history.replaceState(null, "", location.pathname);   // drop the token from the URL
+      enterApp();
+    } catch (ex) {
+      const msg = (ex && ex.message) || "Couldn't accept that invitation.";
+      b.disabled = false; b.textContent = label;
+      newCaptcha();
+      /* the server telling us the email is taken is a redirect, not a dead end */
+      if (!acceptExisting && /exist|already|registered|taken/i.test(msg)) showAcceptExisting(msg);
+      else err.textContent = msg;
+    }
+    return;
   }
   if (!email) { err.textContent = "Enter your email address."; return; }
   if (p.length < 8) { err.textContent = "Password must be at least 8 characters."; return; }
@@ -995,11 +1561,12 @@ $("loginForm").addEventListener("submit", async e => {
   btn.textContent = "Working…";
   try {
     if (creating) {
-      await cloudCreateAccount(CLOUD_DEFAULT_API, company, name, email, p);
+      await cloudCreateAccount(api, company, name, email, p);
       if (getUsers().length === 0) setJSON(K.users, [{ name: name, role: "Administrator" }]);
     } else {
-      await cloudSignIn(CLOUD_DEFAULT_API, email, p);
+      await cloudSignIn(api, email, p);
     }
+    apiSave(api);
     store.set(K.session, "1");
     enterApp();
   } catch (ex) {
@@ -1016,8 +1583,10 @@ function enterApp() {
   showScreen("app");
   renderProfileChip();
   renderAccountBadge();
+  applyPerms();
   navigate("home");
   cloudOnEnter();   // pull cloud changes / push pending (no-op when signed out)
+  permsRefresh();   // re-read roles so a role change lands without a re-login
 }
 
 /* ---------- who's actually signed in (distinct from the editable company
@@ -1033,6 +1602,7 @@ function renderAccountBadge() {
 /* ---------- navigation ---------- */
 const TITLES = { home: "Home", vehicles: "Vehicles", properties: "Properties", projects: "Projects" };
 function navigate(view) {
+  if (!guardView(view)) { if (view !== "home") navigate("home"); return; }
   document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
   $("view-" + view).classList.add("active");
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.nav === view));
@@ -1042,6 +1612,7 @@ function navigate(view) {
   if (view === "vehicles") vehReset();
   if (view === "properties") propReset();
   if (view === "projects") projReset();
+  applyPerms();
   $("screen-app").querySelector(".content").scrollTop = 0;
   window.scrollTo(0, 0);
 }
@@ -1343,7 +1914,7 @@ $("btnCloud").addEventListener("click", () => {
     `<button class="ghost" id="cloudCancel">Cancel</button>
      <button class="primary" id="cloudGo"></button>`);
   function renderCloudFields() {
-    const prevApi = (cloudCfg() && cloudCfg().api) || CLOUD_DEFAULT_API;
+    const prevApi = apiBase();
     $("cloudFields").innerHTML = `
       ${mode === "create" ? `
       <label class="field"><span>Company name</span><input type="text" id="clCompany"></label>
@@ -1379,6 +1950,7 @@ $("btnCloud").addEventListener("click", () => {
       } else {
         await cloudSignIn(api, email, pw);
       }
+      apiSave(api);
       close(); toast("Cloud sync is on"); renderCloudStatus();
     } catch (e) {
       err.textContent = (e && e.message) || "Couldn't sign in.";
@@ -1389,51 +1961,611 @@ $("btnCloud").addEventListener("click", () => {
   setTimeout(() => { const f = $("clEmail"); if (f) f.focus(); }, 50);
 });
 
-/* ---------- users ---------- */
+/* ---------- users & roles (company profile page) ----------
+   Signed in: real company members and pending invitations from the API.
+   Signed out: the local approved-users list, read-only, with a note saying so. */
 $("btnUsers").addEventListener("click", () => {
-  const close = openModal("Approved users",
-    `<ul class="user-list" id="userList"></ul>
-     <div class="add-user-row">
-       <label class="field"><span>Name</span><input type="text" id="newUserName" placeholder="Full name"></label>
-       <label class="field"><span>Role</span><input type="text" id="newUserRole" placeholder="e.g. Inspector"></label>
-       <button class="primary" id="addUserBtn" style="height:42px;">Add</button>
-     </div>
+  const close = openModal("Users & roles",
+    `<div id="usersBody"><p class="pc-meta">Loading…</p></div>
      <p class="form-error" id="userErr" role="alert"></p>`,
     `<button class="ghost" id="usersDone">Done</button>`);
   $("usersDone").addEventListener("click", close);
-
-  function renderUsers() {
-    const users = getUsers();
-    $("userList").innerHTML = users.length
-      ? users.map((u, i) => `
-          <li>
-            <div class="uavatar">${esc(initials(u.name))}</div>
-            <div class="uinfo"><div class="un">${esc(u.name)}</div><div class="ur">${esc(u.role || "User")}</div></div>
-            <button class="rm" data-i="${i}" title="Remove user" aria-label="Remove ${esc(u.name)}">✕</button>
-          </li>`).join("")
-      : `<li style="justify-content:center;color:var(--muted);">No approved users yet.</li>`;
-    $("userList").querySelectorAll(".rm").forEach(btn =>
-      btn.addEventListener("click", () => {
-        const i = Number(btn.dataset.i);
-        const list = getUsers();
-        if (confirm(`Remove "${list[i].name}" from approved users?`)) {
-          list.splice(i, 1); setJSON(K.users, list); renderUsers();
-        }
-      }));
-  }
-  $("addUserBtn").addEventListener("click", () => {
-    const name = $("newUserName").value.trim();
-    const role = $("newUserRole").value.trim() || "User";
-    const err = $("userErr");
-    if (!name) { err.textContent = "Enter a name to add a user."; return; }
-    err.textContent = "";
-    const list = getUsers(); list.push({ name, role }); setJSON(K.users, list);
-    $("newUserName").value = ""; $("newUserRole").value = "";
-    renderUsers(); $("newUserName").focus();
-  });
-  renderUsers();
-  setTimeout(() => $("newUserName").focus(), 50);
+  renderUsersPanel();
 });
+
+/* The role list every picker draws from. Signed out or offline we offer the whole
+   set, since there's no server to say who you are. */
+function roleSelectHTML(id, ids, selected) {
+  return `<select id="${id}">` + ids.map(r =>
+    `<option value="${r}"${r === selected ? " selected" : ""}>${esc(ROLE_PRESETS[r].name)}</option>`
+  ).join("") + `</select>`;
+}
+
+/* Offline / signed-out list. These entries are labels for your own reference —
+   they don't create a sign-in. Saying so plainly beats letting someone think
+   they've given a person access when they haven't. */
+function renderLocalUsers(note) {
+  const body = $("usersBody");
+  if (!body) return;
+  const list = getUsers();
+  const ids = ROLE_ORDER.slice();
+
+  body.innerHTML =
+    `<p class="pc-meta" style="margin-top:0;">${esc(note)}</p>
+     <ul class="user-list" id="localUserList">${
+       list.length
+         ? list.map((u, i) => `<li>
+             <div class="uavatar">${esc(initials(u.name))}</div>
+             <div class="uinfo"><div class="un">${esc(u.name)}</div>
+               <div class="ur">${esc(u.role || "No role")}</div></div>
+             <button class="rm" data-i="${i}" title="Remove"
+               aria-label="Remove ${esc(u.name)}">&#10005;</button>
+           </li>`).join("")
+         : `<li style="justify-content:center;color:var(--muted);">No one added yet.</li>`
+     }</ul>
+     <div class="add-user-row" style="margin-top:18px;">
+       <label class="field"><span>Name</span>
+         <input type="text" id="localUserName" placeholder="Full name"></label>
+       <label class="field"><span>Role</span>
+         ${roleSelectHTML("localUserRole", ids, "vehicle_inspector")}</label>
+       <button class="primary" id="localUserAdd" style="height:42px;">Add</button>
+     </div>
+     <p class="pc-meta" id="localRoleBlurb">${esc(ROLE_PRESETS.vehicle_inspector.blurb)}</p>`;
+
+  const sel = $("localUserRole");
+  sel.addEventListener("change", () => {
+    $("localRoleBlurb").textContent = ROLE_PRESETS[sel.value].blurb;
+  });
+
+  $("localUserAdd").addEventListener("click", () => {
+    const name = $("localUserName").value.trim();
+    const e = $("userErr");
+    if (!name) { e.textContent = "Enter a name to add someone."; return; }
+    e.textContent = "";
+    const l = getUsers();
+    l.push({ name: name, role: ROLE_PRESETS[sel.value].name, roleId: sel.value });
+    setJSON(K.users, l);
+    renderLocalUsers(note);
+    $("localUserName").focus();
+  });
+
+  body.querySelectorAll(".rm").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const l = getUsers();
+      const i = Number(btn.dataset.i);
+      if (!confirm(`Remove "${l[i].name}" from this list?`)) return;
+      l.splice(i, 1);
+      setJSON(K.users, l);
+      renderLocalUsers(note);
+    });
+  });
+
+  setTimeout(() => { const f = $("localUserName"); if (f) f.focus(); }, 40);
+}
+
+/* ---------- reading what the API actually expects ----------
+   The invitation payload differs between builds (role_names / role_ids / role).
+   Rather than guess, read the server's own OpenAPI schema once and fill in the
+   fields it declares. Falls back to the common shape when the schema is
+   unavailable, so an older server still works. */
+let _apiSpec = null;
+
+async function apiSpec() {
+  if (_apiSpec !== null) return _apiSpec;
+  try {
+    const r = await fetch(apiBase() + "/openapi.json");
+    _apiSpec = r.ok ? await r.json() : false;
+  } catch (_) { _apiSpec = false; }
+  return _apiSpec;
+}
+
+function specFind(spec, re, method) {
+  if (!spec || !spec.paths) return null;
+  const key = Object.keys(spec.paths).find(k => re.test(k) && spec.paths[k][method]);
+  return key ? { key: key, op: spec.paths[key][method] } : null;
+}
+
+function specBodyProps(spec, op) {
+  try {
+    let sch = op.requestBody.content["application/json"].schema;
+    if (sch.$ref) sch = spec.components.schemas[sch.$ref.split("/").pop()];
+    return Object.keys(sch.properties || {});
+  } catch (_) { return null; }
+}
+
+/* "/companies/{company_id}/invitations" -> "/companies/<id>/invitations" */
+function specPath(key) {
+  const c = cloudCfg();
+  return key.replace(/\{[^}]+\}/g, c ? c.company : "");
+}
+
+/* The company's roles, once, as { id: name }. Used both to send ids and to turn
+   ids in a server response back into names. */
+let _rolesById = null;
+async function apiRolesMap() {
+  if (_rolesById) return _rolesById;
+  const map = {};
+  const spec = await apiSpec();
+  const hit = specFind(spec, /\/roles$/, "get");
+  if (hit) {
+    try {
+      const r = await cloudFetch(specPath(hit.key), {});
+      if (r.ok) {
+        let list = await r.json();
+        if (list && Array.isArray(list.items)) list = list.items;
+        (list || []).forEach(x => {
+          const id = x.id || x.role_id;
+          if (id && x.name) map[id] = x.name;
+        });
+      }
+    } catch (_) {}
+  }
+  _rolesById = map;
+  return map;
+}
+
+async function apiRoleId(roleName) {
+  const map = await apiRolesMap();
+  const hit = Object.keys(map).find(id => map[id].toLowerCase() === roleName.toLowerCase());
+  return hit || null;
+}
+
+/* A member or invitation can carry its roles as names, as objects, or as bare
+   ids. Read all of them and print the display name. */
+function roleLabels(o, map) {
+  const out = [];
+  const push = v => { if (v && out.indexOf(v) === -1) out.push(v); };
+  const named = o.role_names || o.roles ||
+                (o.role_name ? [o.role_name] : (o.role ? [o.role] : []));
+  (Array.isArray(named) ? named : [named]).forEach(r => {
+    if (!r) return;
+    push(typeof r === "string" ? r : (r.name || map[r.id || r.role_id]));
+  });
+  const ids = o.role_ids || (o.role_id ? [o.role_id] : []);
+  (Array.isArray(ids) ? ids : [ids]).forEach(id => push(map[id]));
+  return out.map(n => { const k = roleKey(n); return k ? ROLE_PRESETS[k].name : n; });
+}
+
+async function buildInviteBody(email, roleId, first, last) {
+  const roleName = ROLE_PRESETS[roleId].name;
+  const full = [first, last].filter(Boolean).join(" ");
+  const spec = await apiSpec();
+  const hit = specFind(spec, /\/companies\/\{[^}]+\}\/invitations$/, "post");
+  const props = hit ? specBodyProps(spec, hit.op) : null;
+
+  if (!props) {
+    const b = { email: email, role_names: [roleName] };
+    if (full) b.name = full;
+    return { body: b, nameSent: !!full };
+  }
+
+  const has = n => props.indexOf(n) !== -1;
+  const body = {};
+  if (has("email")) body.email = email;
+  else if (has("invitee_email")) body.invitee_email = email;
+  else body.email = email;
+
+  /* name, in whichever shape this build declares */
+  let nameSent = false;
+  if (first && has("first_name")) { body.first_name = first; nameSent = true; }
+  if (last && has("last_name")) { body.last_name = last; nameSent = true; }
+  if (!nameSent && full) {
+    if (has("name")) { body.name = full; nameSent = true; }
+    else if (has("full_name")) { body.full_name = full; nameSent = true; }
+    else if (has("display_name")) { body.display_name = full; nameSent = true; }
+  }
+
+  /* role — if the endpoint takes one, refuse to send an invite without it
+     rather than quietly creating a member with no access */
+  let roleSent = false;
+  if (has("role_names")) { body.role_names = [roleName]; roleSent = true; }
+  if (has("roles")) { body.roles = [roleName]; roleSent = true; }
+  if (has("role_name")) { body.role_name = roleName; roleSent = true; }
+  if (has("role")) { body.role = roleName; roleSent = true; }
+  if (has("role_ids") || has("role_id")) {
+    const id = await apiRoleId(roleName);
+    if (id) {
+      if (has("role_ids")) body.role_ids = [id]; else body.role_id = id;
+      roleSent = true;
+    } else if (!roleSent) {
+      throw new Error("Couldn't find the id for the " + roleName +
+        " role on the server, so the invitation would have no role. " +
+        "Check the roles endpoint is reachable.");
+    }
+  }
+  const wantsRole = ["role_names","roles","role_name","role","role_ids","role_id"].some(has);
+  if (wantsRole && !roleSent) {
+    throw new Error("Couldn't attach the " + roleName + " role to this invitation.");
+  }
+  return { body: body, nameSent: nameSent };
+}
+
+/* What we sent with an invitation, kept locally so the pending list can show it.
+   Needed because this API's invitation endpoint accepts a name and role but its
+   list response returns neither — see the backend note in USER-ROLES-SPEC §7.
+   Local to this browser: another administrator won't see these. */
+const INVITE_NAMES_KEY = "inspectit.invitenames";
+function inviteMemos() { const v = getJSON(INVITE_NAMES_KEY, {}); return (v && typeof v === "object") ? v : {}; }
+function inviteMemo(email) {
+  const v = inviteMemos()[String(email || "").toLowerCase()];
+  if (!v) return {};
+  return typeof v === "string" ? { name: v } : v;   // pre-1.1 entries were bare names
+}
+function inviteNameFor(email) { return inviteMemo(email).name || ""; }
+function inviteRoleFor(email) {
+  const id = inviteMemo(email).roleId;
+  return (id && ROLE_PRESETS[id]) ? ROLE_PRESETS[id].name : "";
+}
+/* The token is tied to one invitation, so the memo records which one. Without
+   that check the link icon will happily hand over a token from a previous,
+   already-consumed invitation to the same address — it looks right and fails
+   with "invalid or expired". */
+function inviteTokenFor(email, invitationId) {
+  const memo = inviteMemo(email);
+  if (!memo.token) return "";
+  if (invitationId && memo.invId && memo.invId !== invitationId) return "";
+  return memo.token;
+}
+function inviteMemoSet(email, name, roleId, token, invId) {
+  if (!email || (!name && !roleId && !token)) return;
+  const all = inviteMemos();
+  const key = String(email).toLowerCase();
+  const prev = inviteMemo(email);
+  /* a new token belongs to a new invitation — never mix the two */
+  all[key] = token
+    ? { name: name || prev.name || "", roleId: roleId || prev.roleId || "",
+        token: token, invId: invId || "" }
+    : { name: name || prev.name || "", roleId: roleId || prev.roleId || "",
+        token: prev.token || "", invId: prev.invId || "" };
+  setJSON(INVITE_NAMES_KEY, all);
+}
+
+/* Builds name the token differently — token, invite_token, code, or just id. */
+function inviteTokenFrom(created) {
+  if (!created || typeof created !== "object") return "";
+  return created.token || created.invite_token || created.invitation_token ||
+         created.code || "";
+}
+function inviteIdFrom(created) {
+  if (!created || typeof created !== "object") return "";
+  return created.invitation_id || created.id || "";
+}
+
+/* The URL an invitee opens. The API serves the shell, so point at it there —
+   a file:// path would be meaningless to anyone else. */
+function inviteLink(token) {
+  return apiBase().replace(/\/+$/, "") + "/web/inspectit-app.html?invite=" +
+         encodeURIComponent(token);
+}
+function inviteMemoClear(email) {
+  const all = inviteMemos();
+  delete all[String(email || "").toLowerCase()];
+  setJSON(INVITE_NAMES_KEY, all);
+}
+
+/* Members are read-only on some builds of the API. Rather than draw a Remove
+   button that can only fail, ask the schema what it supports and show what's
+   real. These light up on their own once the endpoints exist. */
+async function memberOps() {
+  const spec = await apiSpec();
+  const re = /\/companies\/\{[^}]+\}\/members\/\{[^}]+\}/;
+  const out = { remove: null, setRoles: null };
+  if (!spec || !spec.paths) return out;
+  Object.keys(spec.paths).forEach(k => {
+    if (!re.test(k)) return;
+    const ops = spec.paths[k];
+    if (ops.delete && !out.remove) out.remove = k;
+    if ((ops.patch || ops.put) && !out.setRoles) {
+      out.setRoles = k;
+      out.setRolesMethod = ops.patch ? "PATCH" : "PUT";
+    }
+  });
+  return out;
+}
+
+function memberIdOf(m) {
+  return m.id || m.membership_id || m.member_id || m.user_id || (m.user && m.user.id) || "";
+}
+
+function inviteEndpoint() {
+  const c = cloudCfg();
+  return "/companies/" + c.company + "/invitations";
+}
+
+/* FastAPI hands back 422s as a list of {loc, msg, type}. Turn any of the shapes
+   it uses into a sentence rather than letting an object stringify itself. */
+async function apiErrorText(r, fallback) {
+  let d = null;
+  try { d = await r.json(); } catch (_) {}
+  const detail = d && (d.detail !== undefined ? d.detail : d.message);
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail) && detail.length) {
+    return detail.map(x => {
+      const field = Array.isArray(x.loc) ? x.loc[x.loc.length - 1] : null;
+      return (field ? field + ": " : "") + (x.msg || x.type || "invalid");
+    }).join("; ");
+  }
+  if (detail && typeof detail === "object") {
+    try { return JSON.stringify(detail); } catch (_) {}
+  }
+  return fallback + " (" + r.status + ")";
+}
+
+/* What this server actually declares, in plain sight. When an invitation comes
+   back without a role there are several possible causes — the endpoint takes no
+   role, it wants a shape we didn't send, or the response names it differently.
+   Guessing costs a round trip each time; this answers it in one look. */
+async function renderApiDiag(invites) {
+  const body = $("usersBody");
+  if (!body) return;
+  const el = document.createElement("details");
+  el.className = "perm-diag";
+  el.innerHTML = '<summary>Server details</summary><pre>Reading…</pre>';
+  body.appendChild(el);
+
+  const out = [];
+  const spec = await apiSpec();
+  if (!spec) {
+    out.push("openapi.json: not reachable at " + apiBase());
+  } else {
+    const inv = specFind(spec, /\/companies\/\{[^}]+\}\/invitations$/, "post");
+    out.push("POST invitations: " + (inv ? inv.key : "not found in schema"));
+    if (inv) {
+      const props = specBodyProps(spec, inv.op);
+      out.push("  body fields it accepts: " + (props ? props.join(", ") : "(couldn't read schema)"));
+    }
+    const acc = specFind(spec, /invitations\/accept$/, "post");
+    out.push("POST accept: " + (acc ? acc.key : "not found in schema"));
+    if (acc) {
+      const aprops = specBodyProps(spec, acc.op);
+      out.push("  body fields it accepts: " + (aprops ? aprops.join(", ") : "(couldn't read schema)"));
+    }
+    const mo = Object.keys(spec.paths || {}).filter(k => /\/members/.test(k))
+      .map(k => "  " + Object.keys(spec.paths[k]).join("/").toUpperCase() + " " + k);
+    out.push("member endpoints:");
+    out.push(mo.length ? mo.join("\n") : "  (none)");
+    const rolesEp = specFind(spec, /\/roles$/, "get");
+    out.push("GET roles: " + (rolesEp ? rolesEp.key : "not found in schema"));
+    const related = Object.keys(spec.paths || {})
+      .filter(k => /invit|role|member/i.test(k))
+      .map(k => "  " + Object.keys(spec.paths[k]).join("/").toUpperCase() + " " + k);
+    if (related.length) out.push("related endpoints:", related.join("\n"));
+  }
+
+  const c = cloudCfg() || {};
+  out.push("");
+  out.push("this session:");
+  out.push("  email: " + (c.email || "(none)"));
+  out.push("  company: " + (c.companyName || "(unnamed)") + " [" + (c.company || "?") + "]");
+  out.push("  roles read from /me: " + ((c.roles || []).join(", ") || "NONE — nothing is being gated"));
+  out.push("  membership object as returned:");
+  out.push("  " + (c.rawMembership
+    ? JSON.stringify(c.rawMembership, null, 1).replace(/\n/g, "\n  ")
+    : "(not captured — reopen the app to refresh)"));
+  out.push("");
+
+  const map = await apiRolesMap();
+  const ids = Object.keys(map);
+  out.push("roles loaded: " + ids.length +
+    (ids.length ? " (" + ids.slice(0, 3).map(i => map[i]).join(", ") + (ids.length > 3 ? ", …" : "") + ")" : ""));
+
+  const first = (invites || [])[0];
+  out.push("first pending invitation, as returned:");
+  out.push("  " + (first ? JSON.stringify(first, null, 1).replace(/\n/g, "\n  ") : "(none)"));
+
+  el.querySelector("pre").textContent = out.join("\n");
+}
+
+async function renderUsersPanel() {
+  const body = $("usersBody");
+  if (!body) return;
+  const err = $("userErr");
+  if (err) err.textContent = "";
+
+  if (!cloudSignedIn()) {
+    renderLocalUsers("Sign in to your company account to give these people their own sign-in.");
+    return;
+  }
+
+  let members = [], invites = [];
+  try {
+    const c = cloudCfg();
+    const [mR, iR] = await Promise.all([
+      cloudFetch("/companies/" + c.company + "/members", {}),
+      cloudFetch("/companies/" + c.company + "/invitations", {})
+    ]);
+    if (mR.ok) members = await mR.json();
+    if (iR.ok) invites = await iR.json();
+    if (Array.isArray(members.items)) members = members.items;
+    if (Array.isArray(invites.items)) invites = invites.items;
+  } catch (_) {
+    renderLocalUsers("Couldn't reach the server, so this is the list saved in this browser. " +
+                     "Reconnect to manage sign-ins.");
+    return;
+  }
+
+  const rmap = await apiRolesMap();
+  const ops = await memberOps();
+  const mine = cloudCfg().email;
+  const rows = (members || []).map(m => {
+    const email = m.email || (m.user && m.user.email) || "";
+    const name = m.name || (m.user && m.user.name) ||
+                 [m.first_name, m.last_name].filter(Boolean).join(" ") ||
+                 inviteNameFor(email) || email || "Unnamed";
+    const roles = roleLabels(m, rmap);
+    const isMe = email && email === mine;
+    const heldIds = roles.map(r => roleKey(r)).filter(Boolean);
+    const editable = !isMe && canManageMember(heldIds);
+    return `<li>
+      <div class="uavatar">${esc(initials(name))}</div>
+      <div class="uinfo">
+        <div class="un">${esc(name)}${isMe ? ' <span class="ur">(you)</span>' : ""}</div>
+        <div class="ur">${esc(email)} · ${esc(roles.join(", ") || "No role")}</div>
+      </div>
+      ${m.status === "suspended" ? '<span class="ur">Suspended</span>' : ""}
+      ${editable && ops.remove ? `<button class="rm" data-remove="${esc(memberIdOf(m))}"
+          data-who="${esc(name)}" title="Remove from company"
+          aria-label="Remove ${esc(name)} from this company">&#10005;</button>` : ""}
+    </li>`;
+  }).join("");
+
+  const inviteRows = (invites || []).filter(i => !i.status || i.status === "pending").map(i => {
+    const iEmail = i.email || i.invitee_email || "";
+    let roleNames = roleLabels(i, rmap);
+    if (!roleNames.length) {
+      const memo = inviteRoleFor(iEmail);
+      if (memo) roleNames = [memo];
+    }
+    const who = i.name || i.full_name ||
+                [i.first_name, i.last_name].filter(Boolean).join(" ") ||
+                inviteNameFor(iEmail);
+    return `<li>
+      <div class="uavatar">✉</div>
+      <div class="uinfo">
+        <div class="un">${esc(who || iEmail)}</div>
+        <div class="ur">${who ? esc(iEmail) + " · " : ""}Invited · ${
+          esc(roleNames.join(", ") || "No role")}</div>
+      </div>
+      ${inviteTokenFor(iEmail, i.id) || i.token ? `<button class="rm" data-copy="${
+          esc(inviteTokenFor(iEmail, i.id) || i.token)}" title="Copy the invitation link"
+          aria-label="Copy the invitation link for ${esc(iEmail)}">&#128279;</button>` : ""}
+      <button class="rm" data-revoke="${esc(i.id)}" data-email="${esc(iEmail)}" title="Cancel invitation"
+        aria-label="Cancel the invitation to ${esc(iEmail)}">✕</button>
+    </li>`;
+  }).join("");
+
+  const grantable = grantableRoleIds();
+  body.innerHTML =
+    `<ul class="user-list">${rows || `<li style="justify-content:center;color:var(--muted);">No members yet.</li>`}</ul>
+     ${ops.remove ? "" : `<p class="pc-meta" style="margin:-8px 0 0;">Members can't be
+       removed or have their role changed from here — this server's members endpoint is
+       read-only. Adding DELETE and PATCH to it turns these controls on.</p>`}
+     ${inviteRows ? `<h4 style="margin:18px 0 8px;font-size:.85rem;">Pending invitations</h4>
+       <ul class="user-list">${inviteRows}</ul>` : ""}
+     ${grantable.length ? `
+       <div class="name-row" style="margin-top:18px;">
+         <label class="field"><span>First name</span>
+           <input type="text" id="inviteFirst" autocomplete="given-name" placeholder="Jane"></label>
+         <label class="field"><span>Last name</span>
+           <input type="text" id="inviteLast" autocomplete="family-name" placeholder="Smith"></label>
+       </div>
+       <div class="add-user-row">
+         <label class="field"><span>Email</span>
+           <input type="email" id="inviteEmail" placeholder="name@company.com"></label>
+         <label class="field"><span>Role</span>
+           ${roleSelectHTML("inviteRole", grantable, grantable[grantable.length - 1])}</label>
+         <button class="primary" id="inviteBtn" style="height:42px;">Invite</button>
+       </div>
+       <p class="pc-meta" id="roleBlurb">${esc(ROLE_PRESETS[grantable[grantable.length - 1]].blurb)}</p>`
+      : `<p class="pc-meta">Your role can't add users. Ask an administrator.</p>`}`;
+
+  renderApiDiag(invites);
+
+  const sel = $("inviteRole");
+  if (sel) sel.addEventListener("change", () => {
+    $("roleBlurb").textContent = ROLE_PRESETS[sel.value].blurb;
+  });
+
+  const btn = $("inviteBtn");
+  if (btn) btn.addEventListener("click", async () => {
+    const email = $("inviteEmail").value.trim();
+    const first = $("inviteFirst").value.trim();
+    const last = $("inviteLast").value.trim();
+    const role = $("inviteRole").value;
+    const e = $("userErr");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      e.textContent = "Enter a valid email address."; return;
+    }
+    if (!canGrantRole(role)) {
+      e.textContent = "Your role can't grant " + ROLE_PRESETS[role].name + "."; return;
+    }
+    /* Blocked at submission, not held for approval: on the accumulation path a
+       pending-approval design would revoke a working inspector's access the
+       moment they accepted, and no mailer exists to chase the request. */
+    const heldNow = memberRoleIdsByEmail(members, rmap, email)
+                      .concat(pendingRoleIdsByEmail(invites, rmap, email));
+    const clash = blockedCombination(heldNow, [role]);
+    if (clash.length) {
+      e.textContent = clash.map(r => ROLE_PRESETS[r].name).join(" and ") +
+        " together needs administrator approval. Ask an administrator to grant it.";
+      return;
+    }
+    const already = (invites || []).some(i =>
+      String(i.email || i.invitee_email || "").toLowerCase() === email.toLowerCase() &&
+      (!i.status || i.status === "pending"));
+    if (already && !confirm(email + " already has an invitation waiting. Send another?")) return;
+    e.textContent = "";
+    btn.disabled = true; btn.textContent = "Inviting…";
+    try {
+      const built = await buildInviteBody(email, role, first, last);
+      const r = await cloudFetch(inviteEndpoint(), { method: "POST", body: built.body });
+      if (!r.ok) throw new Error(await apiErrorText(r, "Couldn't send that invitation"));
+      /* The list endpoint returns no token, so the accept link can only be built
+         from what the create call hands back. Capture it now or lose it. */
+      let created = null; try { created = await r.json(); } catch (_) {}
+      const newToken = inviteTokenFrom(created);
+      inviteMemoSet(email, built.nameSent ? "" : [first, last].filter(Boolean).join(" "),
+                    role, newToken, inviteIdFrom(created));
+      const who = [first, last].filter(Boolean).join(" ") || email;
+      if (newToken) {
+        const url = inviteLink(newToken);
+        try { await navigator.clipboard.writeText(url); toast("Invited " + who + " — link copied"); }
+        catch (_) { prompt("Invitation link for " + who + " — send them this:", url); }
+      } else {
+        toast("Invited " + who);
+      }
+      renderUsersPanel();
+    } catch (ex) {
+      e.textContent = (ex && ex.message) || "Couldn't send that invitation.";
+      btn.disabled = false; btn.textContent = "Invite";
+    }
+  });
+
+  body.querySelectorAll("[data-remove]").forEach(b => {
+    b.addEventListener("click", async () => {
+      if (!confirm("Remove " + b.dataset.who + " from this company? Their sign-in keeps " +
+                   "working but they lose access to this company's records.")) return;
+      try {
+        const path = (ops.remove || "").replace(/\{[^}]+\}/, cloudCfg().company)
+                                       .replace(/\{[^}]+\}/, b.dataset.remove);
+        const r = await cloudFetch(path, { method: "DELETE" });
+        if (!r.ok) throw new Error(await apiErrorText(r, "Couldn't remove that member"));
+        toast(b.dataset.who + " removed");
+        renderUsersPanel();
+      } catch (ex) {
+        $("userErr").textContent = (ex && ex.message) || "Couldn't remove that member.";
+      }
+    });
+  });
+
+  body.querySelectorAll("[data-copy]").forEach(b => {
+    b.addEventListener("click", async () => {
+      const url = inviteLink(b.dataset.copy);
+      try {
+        await navigator.clipboard.writeText(url);
+        toast("Invitation link copied");
+      } catch (_) {
+        /* clipboard is blocked on some origins — show it so it can be copied by hand */
+        prompt("Copy this invitation link:", url);
+      }
+    });
+  });
+
+  body.querySelectorAll("[data-revoke]").forEach(b => {
+    b.addEventListener("click", async () => {
+      if (!confirm("Cancel this invitation? The link stops working immediately.")) return;
+      try {
+        const r = await cloudFetch(inviteEndpoint() + "/" + b.dataset.revoke,
+                                   { method: "DELETE" });
+        if (!r.ok) throw new Error(await apiErrorText(r, "Couldn't cancel that invitation"));
+        inviteMemoClear(b.dataset.email);
+        renderUsersPanel();
+      } catch (ex) {
+        $("userErr").textContent = (ex && ex.message) || "Couldn't cancel that invitation.";
+      }
+    });
+  });
+}
 
 /* ====================== VEHICLES ====================== */
 const getVehicles = () => getJSON(K.vehicles, []);
@@ -1487,7 +2619,7 @@ function renderVehList(root) {
       <div class="page-head"><h1>Vehicles</h1><p>All vehicles belonging to your company or individual account.</p></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button class="report" id="vehReportBtn" style="padding:10px 14px;">Spend report</button>
-        <button class="primary" id="vehAddBtn">+ Add vehicle</button>
+        <button class="primary" id="vehAddBtn" data-perm="vehicles:create">+ Add vehicle</button>
       </div>
     </div>`;
   if (!list.length) {
@@ -1495,7 +2627,7 @@ function renderVehList(root) {
         <div class="ico">${carSVG}</div>
         <h2>No vehicles yet</h2>
         <p>Add your first vehicle to start running inspections, repair tickets, and maintenance schedules.</p>
-        <button class="primary" id="vehAddEmpty">+ Add vehicle</button>
+        <button class="primary" id="vehAddEmpty" data-perm="vehicles:create">+ Add vehicle</button>
       </div>`;
   } else {
     html += `<div class="veh-grid">${list.map(vehCard).join("")}</div>`;
@@ -1582,7 +2714,7 @@ function vehCard(v) {
         <div class="veh-edit-row">
           <button class="report" data-veh-report="${v.id}" title="Repairs & maintenance spend report">Report</button>
           <button class="ghost" data-veh-edit="${v.id}">Edit</button>
-          <button class="danger" data-veh-del="${v.id}">Delete</button>
+          <button class="danger" data-perm="vehicles:delete" data-veh-del="${v.id}">Delete</button>
         </div>
       </div>
     </div>`;
@@ -2438,7 +3570,7 @@ function renderPropList(root) {
       <div class="page-head"><h1>Properties</h1><p>All properties belonging to your company or individual account.</p></div>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button class="report" id="propReportBtn" style="padding:10px 14px;">Spend report</button>
-        <button class="primary" id="propAddBtn">+ Add property</button>
+        <button class="primary" id="propAddBtn" data-perm="properties:create">+ Add property</button>
       </div>
     </div>`;
   if (!list.length) {
@@ -2446,7 +3578,7 @@ function renderPropList(root) {
         <div class="ico">${houseSVG}</div>
         <h2>No properties yet</h2>
         <p>Add your first property to start running inspections, repair tickets, and maintenance schedules.</p>
-        <button class="primary" id="propAddEmpty">+ Add property</button>
+        <button class="primary" id="propAddEmpty" data-perm="properties:create">+ Add property</button>
       </div>`;
   } else {
     html += `<div class="veh-grid">${list.map(propCard).join("")}</div>`;
@@ -2510,7 +3642,7 @@ function propCard(p) {
         <div class="veh-edit-row">
           <button class="report" data-prop-report="${p.id}" title="Repairs, maintenance & projects spend report">Report</button>
           <button class="ghost" data-prop-edit="${p.id}">Edit</button>
-          <button class="danger" data-prop-del="${p.id}">Delete</button>
+          <button class="danger" data-perm="properties:delete" data-prop-del="${p.id}">Delete</button>
         </div>
       </div>
     </div>`;
@@ -4091,7 +5223,7 @@ function projCard(pr) {
       <div class="veh-actions">
         <div class="veh-edit-row">
           <button class="primary" data-proj-open="${pr.id}">Open</button>
-          <button class="danger" data-proj-del="${pr.id}">Delete</button>
+          <button class="danger" data-perm="projects:delete" data-proj-del="${pr.id}">Delete</button>
         </div>
       </div>
     </div>`;
