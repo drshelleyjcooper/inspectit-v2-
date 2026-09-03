@@ -422,3 +422,54 @@ def test_reinviting_a_removed_member_produces_a_working_account(client, company)
     assert any(m["company_id"] == company["id"]
                for m in me.json().get("memberships", [])), \
         "accepted the invite but isn't a member"
+# Append to tests/test_grants.py
+#
+# Settles the open item in the spec patch (Edit 7): is _grants_user_management
+# stale in the same way _other_admins was?
+#
+# The company fixture's Company Administrator is the only member. Demoting them
+# to Vehicle Manager should strand the company — nobody left who can grant the
+# administrator role. _other_admins now knows that (re-keyed to
+# ADMIN = ANY(r.grants)), but _grants_user_management still tests company:assign,
+# which Vehicle Manager holds. If that matters, losing_admin computes False and
+# the guard never runs.
+#
+# 409 => the guard fired; my reading was wrong; drop Edit 7 from the patch.
+# 200 => the gap is real; the company is now unadministrable.
+
+
+def test_demoting_the_sole_admin_to_a_domain_manager_is_refused(client, company):
+    """The last-admin guard should fire on any change that leaves nobody able
+    to restore an administrator — not only on changes that drop company:assign.
+
+    Vehicle Manager holds company:assign but cannot grant Company
+    Administrator, so a company whose only member holds it is stranded: no
+    self-service route back, and no other member to ask.
+    """
+    mid = _membership_id(client, company["id"], company["token"],
+                         company["email"])
+    r = client.patch(
+        f"/companies/{company['id']}/members/{mid}",
+        headers=_auth(company["token"]),
+        json={"role_ids": [company["roles"]["Vehicle Manager"]]})
+    assert r.status_code == 409, r.text
+
+
+def test_the_sole_admin_is_still_left_administrable_after_the_refusal(client, company):
+    """Belt and braces on the case above: whatever the guard decides, the
+    administrator must still be able to act afterwards. If the PATCH went
+    through, this is the request that proves the damage is real rather than
+    theoretical — a stranded company cannot invite anyone.
+    """
+    mid = _membership_id(client, company["id"], company["token"],
+                         company["email"])
+    client.patch(
+        f"/companies/{company['id']}/members/{mid}",
+        headers=_auth(company["token"]),
+        json={"role_ids": [company["roles"]["Vehicle Manager"]]})
+
+    # Company Administrator is the only role that may grant Company
+    # Administrator, so this is the recovery path. It must still work.
+    r = _invite(client, company["id"], company["token"], _addr("rescue"),
+                ["Company Administrator"], company["roles"])
+    assert r.status_code == 200, r.text

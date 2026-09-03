@@ -352,15 +352,16 @@ def _other_admins(conn, company_id: str, membership_id: str) -> int:
 
 
 def _grants_user_management(conn, company_id: str, role_ids) -> bool:
-    # NOTE (unpatched): still keyed on company:assign, which five roles now
-    # hold. See the note accompanying this file — _other_admins was re-keyed
-    # to `ADMIN = ANY(grants)` and this predicate arguably should be too.
+    # Keyed on the ability to GRANT the administrator role, matching
+    # _other_admins. company:assign is held by five roles now, so it no longer
+    # distinguishes someone who can restore an administrator from someone who
+    # merely manages their own domain (§7.5).
     return conn.execute(
         """SELECT count(*) AS n FROM roles
            WHERE id = ANY(%s::uuid[]) AND deleted_at IS NULL
              AND (company_id IS NULL OR company_id = %s)
-             AND jsonb_exists(permissions -> 'company', 'assign')""",
-        (list(role_ids), company_id),
+             AND %s = ANY(grants)""",
+        (list(role_ids), company_id, ADMIN),
     ).fetchone()["n"] > 0
 
 
