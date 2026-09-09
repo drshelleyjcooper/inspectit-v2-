@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.9 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.10 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -815,6 +815,48 @@ spend entries and project sub-records, and it worked. Two layers, both real:
 Behaviour change to expect: an inspector or manager who deletes a record in
 the app now gets a refusal at sync and the server copy wins on the next pull,
 which is §4.1 as written. Suite now 1,223.
+
+**Bug found and fixed 2026-09-09 — the viewer roles could edit.** Brandon's
+manual pass: signed in as Vehicle Viewer, Property Viewer, Project Viewer or
+Viewer, the app let you add and change vehicles, tickets, maintenance and the
+rest. The server was already correct — the collection PUT requires
+`module:edit`, which no viewer holds, and `test_permissions` has pinned that
+since phase 2 — so this was the app on its own: almost no create or edit
+control carried a gate, and when the push came back 403 the flush just
+dropped the pending flag and kept the local change, so the browser copy
+silently disagreed with the server for as long as that browser lived.
+
+Three changes in `web/inspectit-app.html`, none on the server:
+
+- **A write guard at the data layer.** Every write funnels through
+  `store.set` / `store.remove`; `permWriteAllowed()` now refuses one when the
+  member is signed in, the key is a synced collection, and they lack `edit`
+  on its module (`CLOUD_MODULE_BY_NAME`, mirroring `KEY_MODULE` on the
+  server). A refused write toasts "view-only" and redraws from storage.
+  Server-applied data and local-only keys are exempt. This is the part that
+  cannot be defeated by a control the gating pass missed.
+- **A refused push now means the server wins.** On 403 the flush pulls the
+  server copy for that collection (when the module is one the member may
+  view) and applies it, as it already did on 409, and says so. And a
+  collection the member cannot edit is no longer pushed at all: the initial
+  sync used to queue every leftover local collection in the browser and
+  send it regardless of role, which for a limited role was a refused PUT per
+  collection on every sign-in — routine noise before, and it would have
+  doubled with the recovery read. Signing in as the seeded Vehicle
+  Inspector now makes exactly the four reads that role may make.
+- **Gates on the primary write controls** — Edit on a vehicle or property
+  card, Add project, New repair ticket, New inspection, attachments, New
+  warranty record, and the scheduler's Edit schedule / Save schedule / Add
+  category / Mark done / + Cost / Clear / date and odometer fields — and the
+  gating pass now runs after every redraw of the vehicles, properties and
+  projects views, not only on navigation. The scheduler and warranty widgets
+  take the module from their config. Project sub-record forms are not
+  individually gated; the guard covers them.
+
+Verified in the served app signed in as the seeded Viewer: a direct write to
+a synced key leaves storage unchanged; the edit gates hide and the view/print
+ones don't; as Company Administrator the same write lands. Suite unchanged
+at 1,223 (no server change).
 
 **Open after the same sweep, decision needed (not changed):**
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`

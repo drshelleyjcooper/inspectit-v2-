@@ -1160,6 +1160,22 @@ CLOUD_SYNC_NAMES.forEach(n => { CLOUD_FULLKEY[n] = K[n]; });
 const CLOUD_NAME_BY_FULL = {};                       // "inspectit.vehicles" -> "vehicles"
 CLOUD_SYNC_NAMES.forEach(n => { CLOUD_NAME_BY_FULL[K[n]] = n; });
 
+/* Which permission module each synced collection belongs to. Mirrors
+   KEY_MODULE in api/routers/collections.py: the server requires module:edit
+   to accept a PUT, so a member without it must not be able to change the
+   collection locally either — see permWriteAllowed(). */
+const CLOUD_MODULE_BY_NAME = {
+  vehicles: "vehicles", inspections: "vehicle_inspections", tickets: "vehicle_repairs",
+  vehicleMaintenance: "vehicle_maintenance", vehicleMaintTemplates: "vehicle_maintenance",
+  vehicleMaintSpend: "vehicle_maintenance", vehicleWarranties: "vehicle_warranties",
+  properties: "properties", propertyInspections: "property_inspections",
+  propertyTickets: "property_repairs", propertyMaintenance: "property_maintenance",
+  propertyMaintTemplates: "property_maintenance", propertyMaintSpend: "property_maintenance",
+  propertyWarranties: "property_warranties",
+  projects: "projects", projectMeta: "projects",
+  profile: "company"
+};
+
 let cloudApplying = false;     // suppress dirty-marking while applying server data
 let cloudFlushTimer = null;
 let cloudFlushing = false;
@@ -1186,10 +1202,42 @@ function cloudMarkDirty(fullKey) {
   cloudFlushTimer = setTimeout(() => { cloudFlush(); }, 1200);
   renderCloudStatus();
 }
+/* View-only enforcement at the data layer (USER-ROLES-SPEC §4.1: the viewer
+   roles hold view + print and nothing else). Hiding controls is a courtesy
+   that a missed button defeats; refusing the write here cannot be missed.
+   Before 2026-09-09 a viewer could change anything locally — the push then
+   failed with 403 and the app silently dropped it, leaving a browser copy
+   that disagreed with the server (spec §11). Server-applied data
+   (cloudApplying) and local-only keys are never gated. */
+function permWriteAllowed(fullKey) {
+  if (cloudApplying || !permsActive()) return true;
+  const name = CLOUD_NAME_BY_FULL[fullKey];
+  if (!name) return true;
+  const mod = CLOUD_MODULE_BY_NAME[name];
+  if (!mod) return true;
+  return can(mod, "edit");
+}
+let permRefuseToastAt = 0;
+function permRefuseWrite(fullKey) {
+  const now = Date.now();
+  if (now - permRefuseToastAt > 2500) {
+    permRefuseToastAt = now;
+    try { toast("Your role is view-only here — that change wasn't saved."); } catch (_) {}
+  }
+  /* Whatever the caller changed in memory, storage still holds the old
+     state; redraw from storage so the screen agrees with it. */
+  setTimeout(() => { try { cloudRerender(); } catch (_) {} }, 0);
+}
 (function () {
   const rawSet = store.set, rawRemove = store.remove;
-  store.set = (k, v) => { rawSet(k, v); cloudMarkDirty(k); };
-  store.remove = (k) => { rawRemove(k); cloudMarkDirty(k); };
+  store.set = (k, v) => {
+    if (!permWriteAllowed(k)) { permRefuseWrite(k); return; }
+    rawSet(k, v); cloudMarkDirty(k);
+  };
+  store.remove = (k) => {
+    if (!permWriteAllowed(k)) { permRefuseWrite(k); return; }
+    rawRemove(k); cloudMarkDirty(k);
+  };
 })();
 
 function cloudRefreshTokens(c) {
@@ -1256,6 +1304,12 @@ async function cloudFlush() {
   try {
     for (const name of names) {
       const c = cloudCfg(); if (!c || !c.refresh) break;
+      if (!permWriteAllowed(CLOUD_FULLKEY[name])) {
+        /* Not this member's to change (§4.1) — the server would 403 it.
+           Leftover local data from another sign-in in this browser lands
+           here; leave it alone locally and don't send it. */
+        delete c.pending[name]; cloudSaveCfg(c); continue;
+      }
       const raw = store.get(CLOUD_FULLKEY[name]);
       if (raw == null) { delete c.pending[name]; cloudSaveCfg(c); continue; }
       let data;
@@ -1279,7 +1333,28 @@ async function cloudFlush() {
         const cur = cloudCfg(); delete cur.pending[name]; cloudSaveCfg(cur);
         pulledAny = true;
         toast("Updated from another device — showing the latest version.");
-      } else if (r.status === 403 || r.status === 422) {
+      } else if (r.status === 403) {
+        /* The server refused the change (no edit, or a delete without
+           delete). Until 2026-09-09 this just dropped the pending flag and
+           kept the local version, so the browser quietly disagreed with the
+           server. Now the server copy wins, as on a 409. */
+        const cur = cloudCfg(); delete cur.pending[name]; cloudSaveCfg(cur);
+        const mod = CLOUD_MODULE_BY_NAME[name];
+        try {
+          if (mod && !can(mod, "view")) throw new Error("not viewable");
+          const g = await cloudFetch("/companies/" + c.company + "/collections/" + name, {});
+          if (g.status === 200) {
+            const out = await g.json();
+            cloudApplyServer(name, out.data, out.updated_at);
+            pulledAny = true;
+            toast("Your role can't change " + name + " — restored the server copy.");
+          }
+          /* 403/404 on the GET: the member can't view this collection or the
+             server has none. Nothing to restore; the local copy is left as
+             it was (the initial sync pushes leftover local collections for
+             every role, so this is routine, not an error worth a toast). */
+        } catch (_) { /* offline — the next pull will reconcile */ }
+      } else if (r.status === 422) {
         const cur = cloudCfg(); delete cur.pending[name]; cloudSaveCfg(cur);
       }
       /* other statuses: keep pending, retried by the interval timer */
@@ -1314,7 +1389,8 @@ async function cloudSyncNow(isInitial) {
   }
   const cur = cloudCfg(); cur.pending = cur.pending || {};
   CLOUD_SYNC_NAMES.forEach(name => {
-    if (!server[name] && store.get(CLOUD_FULLKEY[name]) != null) cur.pending[name] = 1;
+    if (!server[name] && store.get(CLOUD_FULLKEY[name]) != null
+        && permWriteAllowed(CLOUD_FULLKEY[name])) cur.pending[name] = 1;
   });
   cur.lastSync = new Date().toISOString();
   cloudSaveCfg(cur);
@@ -2646,10 +2722,11 @@ function renderVehicles() {
   teardownReportEngine();
   const root = $("vehiclesRoot");
   if (!root) return;
-  if (vehView.mode === "form") return renderVehForm(root);
-  if (vehView.mode === "tool") return renderVehTool(root);
-  if (vehView.mode === "history") return renderVehHistory(root);
-  return renderVehList(root);
+  if (vehView.mode === "form") renderVehForm(root);
+  else if (vehView.mode === "tool") renderVehTool(root);
+  else if (vehView.mode === "history") renderVehHistory(root);
+  else renderVehList(root);
+  applyPerms(root);   // navigate() gates the first draw; this covers redraws
 }
 
 /* ----- list ----- */
@@ -2754,7 +2831,7 @@ function vehCard(v) {
         <div class="veh-tools">${tools}</div>
         <div class="veh-edit-row">
           <button class="report" data-veh-report="${v.id}" title="Repairs & maintenance spend report">Report</button>
-          <button class="ghost" data-veh-edit="${v.id}">Edit</button>
+          <button class="ghost" data-perm="vehicles:edit" data-veh-edit="${v.id}">Edit</button>
           <button class="danger" data-perm="vehicles:delete" data-veh-del="${v.id}">Delete</button>
         </div>
       </div>
@@ -3150,7 +3227,7 @@ function renderVehHistory(root) {
     ${list.length
       ? `<div class="insp-list">${rows}</div>`
       : `<div class="empty"><div class="ico">${toolIcons.inspection}</div><h2>No inspections yet</h2><p>Saved inspections for this vehicle will appear here.</p></div>`}
-    <div style="margin-top:18px;"><button class="primary" id="histNewInsp">+ New inspection</button></div>`;
+    <div style="margin-top:18px;"><button data-perm="vehicle_inspections:create" class="primary" id="histNewInsp">+ New inspection</button></div>`;
 
   $("histBack").onclick = vehReset;
   $("histNewInsp").onclick = () => vehOpenTool(v.id, "inspection");
@@ -3308,7 +3385,7 @@ function renderRepairList(root, v, tm) {
     </div>
 
     <div class="rep-toolbar">
-      <button class="primary" id="newTicketBtn">+ New repair ticket</button>
+      <button data-perm="vehicle_repairs:edit" class="primary" id="newTicketBtn">+ New repair ticket</button>
       <span class="grow"></span>
       <label class="field" style="flex-direction:row; align-items:center; gap:8px; color:var(--muted);">Cost range
         <select id="repRange">
@@ -3378,7 +3455,7 @@ function renderRepairForm(root, v, tm) {
 
       <div style="margin-top:16px;">
         <div class="field" style="color:var(--muted); margin-bottom:6px;">Invoices / receipts <span style="font-size:12px;">(PDF only)</span></div>
-        <button type="button" class="ghost" id="addAtt" style="padding:8px 14px;">Upload PDF</button>
+        <button type="button" class="ghost" data-perm="vehicle_repairs:edit" id="addAtt" style="padding:8px 14px;">Upload PDF</button>
         <input type="file" id="attInput" accept="application/pdf,.pdf" multiple class="hidden">
         <ul class="att-list" id="attList"></ul>
       </div>
@@ -3584,10 +3661,11 @@ function renderProperties() {
   teardownReportEngine();
   const root = $("propertiesRoot");
   if (!root) return;
-  if (propView.mode === "form") return renderPropForm(root);
-  if (propView.mode === "tool") return renderPropTool(root);
-  if (propView.mode === "history") return renderPropHistory(root);
-  return renderPropList(root);
+  if (propView.mode === "form") renderPropForm(root);
+  else if (propView.mode === "tool") renderPropTool(root);
+  else if (propView.mode === "history") renderPropHistory(root);
+  else renderPropList(root);
+  applyPerms(root);
 }
 
 /* ----- property inspection summary (read-only until Phase 2) ----- */
@@ -3684,7 +3762,7 @@ function propCard(p) {
         <div class="veh-tools">${tools}</div>
         <div class="veh-edit-row">
           <button class="report" data-prop-report="${p.id}" title="Repairs, maintenance & projects spend report">Report</button>
-          <button class="ghost" data-prop-edit="${p.id}">Edit</button>
+          <button class="ghost" data-perm="properties:edit" data-prop-edit="${p.id}">Edit</button>
           <button class="danger" data-perm="properties:delete" data-prop-del="${p.id}">Delete</button>
         </div>
       </div>
@@ -3999,7 +4077,7 @@ function renderPropHistory(root) {
     ${list.length
       ? `<div class="insp-list">${rows}</div>`
       : `<div class="empty"><div class="ico">${toolIcons.inspection}</div><h2>No inspections yet</h2><p>Saved inspections for this property will appear here.</p></div>`}
-    <div style="margin-top:18px;"><button class="primary" id="histNewInsp">+ New inspection</button></div>`;
+    <div style="margin-top:18px;"><button data-perm="property_inspections:create" class="primary" id="histNewInsp">+ New inspection</button></div>`;
 
   $("histBack").onclick = propReset;
   $("histNewInsp").onclick = () => propOpenTool(p.id, "inspection");
@@ -4123,7 +4201,7 @@ function renderPropRepairList(root, p, tm) {
     </div>
 
     <div class="rep-toolbar">
-      <button class="primary" id="newTicketBtn">+ New repair ticket</button>
+      <button data-perm="property_repairs:edit" class="primary" id="newTicketBtn">+ New repair ticket</button>
       <span class="grow"></span>
       <label class="field" style="flex-direction:row; align-items:center; gap:8px; color:var(--muted);">Cost range
         <select id="repRange">
@@ -4195,7 +4273,7 @@ function renderPropRepairForm(root, p, tm) {
 
       <div style="margin-top:16px;">
         <div class="field" style="color:var(--muted); margin-bottom:6px;">Invoices / receipts <span style="font-size:12px;">(PDF only)</span></div>
-        <button type="button" class="ghost" id="addAtt" style="padding:8px 14px;">Upload PDF</button>
+        <button type="button" class="ghost" data-perm="property_repairs:edit" id="addAtt" style="padding:8px 14px;">Upload PDF</button>
         <input type="file" id="attInput" accept="application/pdf,.pdf" multiple class="hidden">
         <ul class="att-list" id="attList"></ul>
       </div>
@@ -4479,7 +4557,7 @@ function makeScheduler(cfg) {
     ctx: () => ({}),
     status: (it, val) => pmStatus(it, val || ""),
     sub: (it, val, st) => `${FREQ_LABEL[it.freq || "annual"]} &middot; Last done: <b>${val ? esc(val) : "—"}</b> &middot; Due: <b>${st.due ? esc(st.due) : "—"}</b>`,
-    controls: (it, key, val) => `<input type="date" class="mr-date" data-key="${esc(key)}" value="${esc(val || "")}" title="Last done date"><button type="button" class="iconbtn light mr-done" data-key="${esc(key)}">Mark done</button><button type="button" class="iconbtn light mr-addcost" data-key="${esc(key)}" title="Add a service cost to the spend history (e.g. one recorded without a cost, or from an earlier date)">+ Cost</button>${val ? `<button type="button" class="iconbtn light mr-clear" data-key="${esc(key)}" title="Reset to Never done">Clear</button>` : ""}`,
+    controls: (it, key, val) => `<input type="date" class="mr-date" data-perm="${cfg.module}:edit" data-key="${esc(key)}" value="${esc(val || "")}" title="Last done date"><button type="button" class="iconbtn light mr-done" data-perm="${cfg.module}:edit" data-key="${esc(key)}">Mark done</button><button type="button" class="iconbtn light mr-addcost" data-perm="${cfg.module}:edit" data-key="${esc(key)}" title="Add a service cost to the spend history (e.g. one recorded without a cost, or from an earlier date)">+ Cost</button>${val ? `<button type="button" class="iconbtn light mr-clear" data-perm="${cfg.module}:edit" data-key="${esc(key)}" title="Reset to Never done">Clear</button>` : ""}`,
     bindRows: (root, api) => {
       root.querySelectorAll(".mr-date").forEach(el => el.onchange = () => api.set(el.dataset.key, el.value));
       root.querySelectorAll(".mr-done").forEach(el => el.onclick = () => { api.logSpend(el.dataset.key, pmPromptCost()); api.set(el.dataset.key, api.today); });
@@ -4587,7 +4665,7 @@ function makeScheduler(cfg) {
             </div>
           </div>
         </div>`).join("");
-      body += `<div style="margin-top:14px;"><button type="button" class="iconbtn brand" id="meAddCat">+ Add category</button></div>`;
+      body += `<div style="margin-top:14px;"><button type="button" class="iconbtn brand" data-perm="${cfg.module}:edit" id="meAddCat">+ Add category</button></div>`;
     } else {
       let over = 0, soon = 0, ok = 0;
       /* per-item spend history (cfg.spendKey), keyed "Cat::Item"; keeps the original
@@ -4633,8 +4711,8 @@ function makeScheduler(cfg) {
           <select id="pmTemplate"${editing ? " disabled" : ""}>${opts}</select>
         </label>
         <span class="grow"></span>
-        <button type="button" class="iconbtn brand" id="pmEdit">${editing ? "Done editing" : "Edit schedule"}</button>
-        <button type="button" class="iconbtn go" id="pmSave" title="Save the current schedule as a reusable template">Save schedule…</button>
+        <button type="button" class="iconbtn brand" data-perm="${cfg.module}:edit" id="pmEdit">${editing ? "Done editing" : "Edit schedule"}</button>
+        <button type="button" class="iconbtn go" data-perm="${cfg.module}:edit" id="pmSave" title="Save the current schedule as a reusable template">Save schedule…</button>
         ${(!editing && saved[S.selected]) ? `<button type="button" class="iconbtn danger" id="pmDelete">Delete schedule</button>` : ""}
       </div>
       ${editing ? `<p class="hint">Rename items &amp; categories, change each item's frequency, and add or remove items &amp; categories. Then <b>Done editing</b> and <b>Save schedule…</b> to keep it as a reusable template.</p>`
@@ -4653,6 +4731,7 @@ function makeScheduler(cfg) {
     root.querySelector("#pmEdit").onclick = () => { S.view = editing ? "view" : "edit"; rerender(); };
     root.querySelector("#pmSave").onclick = saveTemplate;
     const del = root.querySelector("#pmDelete"); if (del) del.onclick = deleteTemplate;
+    applyPerms(root);   // gates edit/mark-done/cost/clear/✕ for view-only roles (§4.1)
 
     const api = { set: (k, val) => { setItem(id, k, val); rerender(); }, get: k => stateMap[k], today: pmISO(new Date()), ctx,
       /* append a completed-service cost to this entity's spend history (cfg.spendKey);
@@ -4697,7 +4776,6 @@ function makeScheduler(cfg) {
         box.style.display = show ? "" : "none";
         el.textContent = el.textContent.replace(show ? "▸" : "▾", show ? "▾" : "▸");
       });
-      applyPerms(root);   // §4.1: removing a spend entry is a delete
       root.querySelectorAll(".mh-rm").forEach(el => el.onclick = () => {
         if (!confirm("Remove this cost entry from the history?")) return;
         const all = getJSON(cfg.spendKey, {});
@@ -4840,11 +4918,11 @@ function vehControls(it, key, val) {
   const o = (val && val.o != null && val.o !== "") ? Number(val.o) : null;
   const hasMiles = it.miles != null && it.miles > 0;
   const done = !!(d || o != null);
-  return `<input type="date" class="mr-date" data-key="${esc(key)}" value="${esc(d)}" title="Last done date">`
+  return `<input type="date" class="mr-date" data-perm="vehicle_maintenance:edit" data-key="${esc(key)}" value="${esc(d)}" title="Last done date">`
     + (hasMiles ? `<input type="text" inputmode="numeric" class="mr-odo" data-key="${esc(key)}" value="${o != null ? esc(milesFmt(o)) : ""}" placeholder="odo at service" title="Odometer at last service">` : "")
-    + `<button type="button" class="iconbtn light mr-done" data-key="${esc(key)}">Mark done</button>`
-    + `<button type="button" class="iconbtn light mr-addcost" data-key="${esc(key)}" title="Add a service cost to the spend history (e.g. one recorded without a cost, or from an earlier date)">+ Cost</button>`
-    + (done ? `<button type="button" class="iconbtn light mr-clear" data-key="${esc(key)}" title="Reset to Never done">Clear</button>` : "");
+    + `<button type="button" class="iconbtn light mr-done" data-perm="vehicle_maintenance:edit" data-key="${esc(key)}">Mark done</button>`
+    + `<button type="button" class="iconbtn light mr-addcost" data-perm="vehicle_maintenance:edit" data-key="${esc(key)}" title="Add a service cost to the spend history (e.g. one recorded without a cost, or from an earlier date)">+ Cost</button>`
+    + (done ? `<button type="button" class="iconbtn light mr-clear" data-perm="vehicle_maintenance:edit" data-key="${esc(key)}" title="Reset to Never done">Clear</button>` : "");
 }
 
 function vehDetailBox(v, tm) {
@@ -4896,7 +4974,7 @@ const vehSched = makeScheduler({
       const val = ctx.odo != null ? milesFmt(ctx.odo) : "";
       return `<div class="maint-odo">
         <label class="field" style="flex-direction:row; align-items:center; gap:8px; color:var(--muted); margin:0;">Current odometer
-          <input type="text" id="pmOdo" inputmode="numeric" value="${esc(val)}" placeholder="e.g. 84,231" style="width:120px;">
+          <input type="text" id="pmOdo" data-perm="vehicle_maintenance:edit" inputmode="numeric" value="${esc(val)}" placeholder="e.g. 84,231" style="width:120px;">
         </label>
         <span class="mo-src">Source: ${esc(src)}${ctx.source === "manual" ? ` &middot; <button type="button" class="linklike" id="pmOdoReset">use latest inspection</button>` : ""}</span>
       </div>`;
@@ -5026,7 +5104,7 @@ function makeWarranties(cfg) {
       <div class="page-head"><h1>Warranties / Records</h1><p>${cfg.headMeta(entity, tm)}</p></div>
       ${cfg.detailBox(entity, tm)}
       <div class="maint-summary"><span><b>${expired}</b> expired</span><span><b>${soon}</b> expiring soon</span><span><b>${active}</b> active</span></div>
-      <div class="rep-toolbar" style="margin-top:12px;"><button class="primary" id="newWarrBtn">+ New record</button></div>
+      <div class="rep-toolbar" style="margin-top:12px;"><button class="primary" data-perm="${cfg.module}:edit" id="newWarrBtn">+ New record</button></div>
       ${list.length
         ? `<div class="rep-list" style="margin-top:14px;">${rows}</div>`
         : `<div class="empty"><div class="ico">${toolIcons.warranty}</div><h2>No warranty records yet</h2><p>Add purchase dates, warranty expirations, service dates, and documentation for this ${esc(cfg.entityWord)}.</p></div>`}`;
@@ -5215,8 +5293,9 @@ function projReset() { projView = { mode: "list", editId: null, editSections: fa
 function renderProjects() {
   const root = $("projectsRoot");
   if (!root) return;
-  if (projView.mode === "form") return renderProjForm(root);
-  return renderProjList(root);
+  if (projView.mode === "form") renderProjForm(root);
+  else renderProjList(root);
+  applyPerms(root);
 }
 
 /* ----- list ----- */
@@ -5226,7 +5305,7 @@ function renderProjList(root) {
   const props = getProperties();
   let html = `<div class="section-head">
       <div class="page-head"><h1>Projects</h1><p>Organize work into projects, each tied to one of your properties.</p></div>
-      <button class="primary" id="projAddBtn">+ Add project</button>
+      <button class="primary" id="projAddBtn" data-perm="projects:create">+ Add project</button>
     </div>`;
   if (!props.length) {
     html += `<div class="empty">
@@ -5240,7 +5319,7 @@ function renderProjList(root) {
         <div class="ico">${projectSVG}</div>
         <h2>No projects yet</h2>
         <p>Create your first project to track scope, costs, contractors, permits, and records.</p>
-        <button class="primary" id="projAddEmpty">+ Add project</button>
+        <button class="primary" id="projAddEmpty" data-perm="projects:create">+ Add project</button>
       </div>`;
   } else {
     html += `<div class="veh-grid">${list.map(projCard).join("")}</div>`;
