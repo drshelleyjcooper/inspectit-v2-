@@ -20,14 +20,26 @@ MODULES = [
     "projects",
 ]
 ACTIONS = ["view", "create", "edit", "delete", "print", "assign", "admin"]
-_ALL = ["view", "create", "edit", "delete", "print", "assign"]
-_MANAGE = ["view", "create", "edit", "print", "assign"]              # no delete
-_WORK = ["view", "create", "edit", "print"]                          # field work
+
+# §4.1 puts `assign` on the three entity HEADS (vehicles, properties,
+# projects) and on `company` only. The tool modules under a head — inspections,
+# maintenance, repairs, warranties — never carry it: "assign on an entity
+# module = may assign users to records in it" (§3), and users are assigned to
+# a vehicle or a property, not to an inspection. Until 2026-09-09 every
+# manager-tier preset granted assign on the tools too (spec §11).
+_ALL = ["view", "create", "edit", "delete", "print", "assign"]      # heads, admin
+_ALL_TOOL = ["view", "create", "edit", "delete", "print"]           # tools, admin
+_MANAGE = ["view", "create", "edit", "print", "assign"]             # heads, managers
+_WORK = ["view", "create", "edit", "print"]                         # tools + field work
 _VIEW_PRINT = ["view", "print"]
-_VEHICLE_MODULES = ["vehicles", "vehicle_inspections", "vehicle_maintenance",
-                    "vehicle_repairs", "vehicle_warranties"]
-_PROPERTY_MODULES = ["properties", "property_inspections", "property_maintenance",
-                     "property_repairs", "property_warranties"]
+_VEHICLE_TOOLS = ["vehicle_inspections", "vehicle_maintenance",
+                  "vehicle_repairs", "vehicle_warranties"]
+_PROPERTY_TOOLS = ["property_inspections", "property_maintenance",
+                   "property_repairs", "property_warranties"]
+_VEHICLE_MODULES = ["vehicles"] + _VEHICLE_TOOLS
+_PROPERTY_MODULES = ["properties"] + _PROPERTY_TOOLS
+_HEADS = ["vehicles", "properties", "projects"]
+_TOOLS = _VEHICLE_TOOLS + _PROPERTY_TOOLS
 _ENTITY_MODULES = _VEHICLE_MODULES + _PROPERTY_MODULES + ["projects"]
 
 # Role names, referenced by the grants lists below.
@@ -51,8 +63,12 @@ ROLE_PRESETS = [
     {
         "name": ADMIN,
         "scope": "company",
-        "permissions": {**{m: list(_ALL) for m in _ENTITY_MODULES},
-                        "company": _ALL + ["admin"]},
+        # company: vedp·as·ad — no `create`; a company is not created from
+        # inside itself (§4.1).
+        "permissions": {**{m: list(_ALL) for m in _HEADS},
+                        **{m: list(_ALL_TOOL) for m in _TOOLS},
+                        "company": ["view", "edit", "delete", "print",
+                                    "assign", "admin"]},
         # The only role that may issue ADMIN or the company-wide VIEWER.
         "grants": list(ALL_ROLES),
         "viewer_grants": [],
@@ -61,7 +77,8 @@ ROLE_PRESETS = [
         # Everything except delete; manages users but not billing.
         "name": MANAGER,
         "scope": "company",
-        "permissions": {**{m: list(_MANAGE) for m in _ENTITY_MODULES},
+        "permissions": {**{m: list(_MANAGE) for m in _HEADS},
+                        **{m: list(_WORK) for m in _TOOLS},
                         "company": ["view", "edit", "print", "assign", "admin"]},
         # Outranks the domain managers, so the §2.3 block doesn't apply: a
         # Manager may deliberately issue inspector + maintenance together.
@@ -74,7 +91,8 @@ ROLE_PRESETS = [
         # Vehicle domain; assigns inspectors & maintenance; no delete.
         "name": VEH_MGR,
         "scope": "company",
-        "permissions": {**{m: list(_MANAGE) for m in _VEHICLE_MODULES},
+        "permissions": {"vehicles": list(_MANAGE),
+                        **{m: list(_WORK) for m in _VEHICLE_TOOLS},
                         "company": ["assign"]},      # may open the invite form
         "grants": [VEH_INSP, VEH_MAINT],             # domain-limited (§2.2)
         "viewer_grants": [VEH_VIEW],
@@ -83,7 +101,8 @@ ROLE_PRESETS = [
         # Property domain + full project access (decided 2026-08-29).
         "name": PROP_MGR,
         "scope": "company",
-        "permissions": {**{m: list(_MANAGE) for m in _PROPERTY_MODULES},
+        "permissions": {"properties": list(_MANAGE),
+                        **{m: list(_WORK) for m in _PROPERTY_TOOLS},
                         "projects": list(_MANAGE),
                         "company": ["assign"]},
         "grants": [PROP_INSP, PROP_MAINT],
@@ -176,8 +195,9 @@ ROLE_PRESETS = [
     },
 ]
 
-# Bump on any change above. Logged at boot; the tests assert against it.
-PRESET_VERSION = 2
+# Bump on any change above. Inert: nothing logs or asserts it and the seeder
+# re-seeds unconditionally every boot (spec §11) — kept as a change marker.
+PRESET_VERSION = 3
 
 
 def seed_role_presets(conn) -> int:

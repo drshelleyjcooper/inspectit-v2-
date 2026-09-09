@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.5 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.6 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,216 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -759,13 +759,25 @@ raise; `test_acceptance_time_block_actually_revokes` asserts the invitation
 lists as revoked and a second accept fails as invalid (400), not blocked.
 Suite now 1,216.
 
+**Resolved 2026-09-09 — the §4.1 grid wins.** §4.1's grid shows `assign`
+only on vehicles, properties, projects and company. `presets.py` had granted
+`assign` on every tool module for Company Administrator, Manager, Vehicle
+Manager and Property Manager since Phase 1 — twenty-four cells — and Company
+Administrator's `company` cell carried a `create` the grid never had.
+`test_role_matrix.py`, which says it is transcribed from this grid, had been
+transcribed from the code instead and so passed. Decision: the grid is right
+(§3: assign on an entity module means assigning users to its records, and
+users are assigned to a vehicle or property, not to an inspection).
+`presets.py` now grants assign on the three heads and company only;
+`PRESET_VERSION` 2 → 3; the matrix test's shorthand gained `FULL_TOOL` and
+uses `WORK` for the tools. The seeder's `DO UPDATE` lands the narrowed
+blobs on the next boot with no migration. The frontend's own copy of the
+table in `web/inspectit-app.html` (`permBlob(..., FULL/NO_DEL, ...)`) has the
+same drift and is NOT changed here — cosmetic under §5, and no control in
+the app is gated on an `assign` cell at all: the invite form keys on
+`grants` via `grantableRoleIds()`.
+
 **Open after the same sweep, decision needed (not changed):**
-- §4.1's grid shows `assign` only on vehicles, properties, projects and
-  company. `presets.py` grants `assign` on every tool module for Company
-  Administrator, Manager, Vehicle Manager and Property Manager, and has since
-  Phase 1; `test_role_matrix.py` matches the code, not the grid. Twenty-four
-  cells. Company Administrator's `company` cell also carries `create` in code
-  but not in the grid.
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`
   gates on `company:edit`. Same outcome for all thirteen presets; not for a
   custom role holding edit without admin.

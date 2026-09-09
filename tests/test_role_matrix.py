@@ -19,10 +19,14 @@ import pytest
 
 from api.presets import ACTIONS, MODULES, ROLE_PRESETS
 
-# Shorthand for the table below.
-FULL = "view create edit delete print assign".split()
-MANAGE = "view create edit print assign".split()
-WORK = "view create edit print".split()
+# Shorthand for the table below. `assign` sits on the entity heads and on
+# company only (§4.1); the tools under a head never carry it. The first
+# transcription of this grid put FULL/MANAGE on the tools too and so matched
+# presets.py rather than the spec — 24 cells, caught 2026-09-09 (spec §11).
+FULL = "view create edit delete print assign".split()      # heads, admin
+FULL_TOOL = "view create edit delete print".split()        # tools, admin
+MANAGE = "view create edit print assign".split()           # heads, managers
+WORK = "view create edit print".split()                    # tools + field work
 READ = ["view", "print"]
 SEE = ["view"]
 
@@ -41,26 +45,28 @@ def _spread(mods, acts):
 EXPECTED = {
     "Company Administrator": {
         "scope": "company",
-        "perms": {"vehicles": FULL, **_spread(VEH_TOOLS, FULL),
-                  "properties": FULL, **_spread(PROP_TOOLS, FULL),
+        "perms": {"vehicles": FULL, **_spread(VEH_TOOLS, FULL_TOOL),
+                  "properties": FULL, **_spread(PROP_TOOLS, FULL_TOOL),
                   "projects": FULL,
-                  "company": FULL + ["admin"]},
+                  # vedp·as·ad — no create (§4.1)
+                  "company": ["view", "edit", "delete", "print",
+                              "assign", "admin"]},
     },
     "Manager": {
         "scope": "company",
-        "perms": {"vehicles": MANAGE, **_spread(VEH_TOOLS, MANAGE),
-                  "properties": MANAGE, **_spread(PROP_TOOLS, MANAGE),
+        "perms": {"vehicles": MANAGE, **_spread(VEH_TOOLS, WORK),
+                  "properties": MANAGE, **_spread(PROP_TOOLS, WORK),
                   "projects": MANAGE,
                   "company": ["view", "edit", "print", "assign", "admin"]},
     },
     "Vehicle Manager": {
         "scope": "company",
-        "perms": {"vehicles": MANAGE, **_spread(VEH_TOOLS, MANAGE),
+        "perms": {"vehicles": MANAGE, **_spread(VEH_TOOLS, WORK),
                   "company": ["assign"]},
     },
     "Property Manager": {
         "scope": "company",
-        "perms": {"properties": MANAGE, **_spread(PROP_TOOLS, MANAGE),
+        "perms": {"properties": MANAGE, **_spread(PROP_TOOLS, WORK),
                   "projects": MANAGE, "company": ["assign"]},
     },
     "Project Manager": {
