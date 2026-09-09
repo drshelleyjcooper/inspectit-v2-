@@ -36,6 +36,23 @@ Open **`web/inspectit-app.html`** in any modern browser. No build step, no
 server required for local use. Cloud sync connects to the API when configured
 (sign in via the "Cloud sync" button on the Home screen).
 
+## Seed a test company (one member per role)
+
+For the manual role pass (USER-ROLES-SPEC §9.4). With the API running:
+
+```bash
+.venv/bin/python seed_roles.py                  # new company, 13 sign-ins, prints a table
+.venv/bin/python seed_roles.py --viewer-grants  # also sets can_grant_viewers on the domain managers
+.venv/bin/python seed_roles.py --json           # machine-readable
+```
+
+Every run creates a fresh company (name and emails carry a run tag), so it is
+safe to repeat. It drives the real signup → invite → accept path over HTTP and
+needs `DEV_MODE=1` (the `run_dev.py` default) so invite tokens come back in the
+response. `/auth/*` is rate-limited to 10/min per IP by default and the script
+makes 13 auth calls, so expect one pause of up to a minute; set
+`AUTH_RATE_LIMIT=100` in the environment before launching the API to skip it.
+
 ## Tests
 
 ```bash
