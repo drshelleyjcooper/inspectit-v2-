@@ -1,8 +1,8 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.6 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.7 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
-the full suite green (1,216 tests)
+the full suite green (1,218 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
 **Source of truth for the matrix:** this document. `User_Roles_Chart.pdf` is
 now historical — the decisions in §2 go beyond what the chart covers.
@@ -345,6 +345,10 @@ Two additions for v2.0:
 - `/me` must return each role's `grants`, for the same reason. Hardcoding the
   §4.2 table in the frontend would break the "change a role in the backend,
   the UI follows" property that v1.1 established.
+
+*Corrected 2026-09-09:* neither field was returned until that date — see
+§11. Both now are; the frontend consumes `can_grant_viewers` already and
+still builds its role list from its own copy of §4.2 (§6 follow-up).
 
 ---
 
@@ -781,10 +785,22 @@ the app is gated on an `assign` cell at all: the invite form keys on
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`
   gates on `company:edit`. Same outcome for all thirteen presets; not for a
   custom role holding edit without admin.
-- §5 says `/me` "must" return `can_grant_viewers` and each role's `grants`.
-  It never has. The frontend reads `m.can_grant_viewers` and falls back to
-  false, and takes grants from its own hardcoded preset table — the outcome
-  §5 says must not happen.
+
+**Resolved 2026-09-09 — `/me` now returns `can_grant_viewers` and each role's
+`grants`.** §5 said both "must" be returned and neither ever was; the route
+selected `id, name, scope, permissions` only, and `git log -S` finds no
+version that did otherwise. The user-visible effect: the frontend reads
+`m.can_grant_viewers`, got `undefined`, and fell back to `false`, so a domain
+manager never saw its viewer role in the invite form even after an
+administrator enabled the flag — the server accepted the grant, the UI
+never offered it. `api/routers/me.py` now returns `can_grant_viewers` per
+membership and `grants` / `viewer_grants` per role; two tests in
+`test_grants.py` pin both (the flag is false, then true after the PATCH; a
+role's grants equal the seeded preset's). The flag reaches the app with no
+frontend change. The grants do not yet: `grantableRoleIds()` still reads
+the app's hardcoded `ROLE_PRESETS`, so the "change a role in the backend,
+the UI follows" property §5 asks for needs a §6 follow-up that reads
+`role.grants` from `/me` instead. Suite now 1,218.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather

@@ -11,7 +11,8 @@ router = APIRouter(tags=["me"])
 def me(user: dict = Depends(current_user)):
     with get_pool().connection() as conn:
         memberships = conn.execute(
-            """SELECT m.id AS membership_id, m.company_id, c.name AS company_name
+            """SELECT m.id AS membership_id, m.company_id, c.name AS company_name,
+                      m.can_grant_viewers
                FROM memberships m JOIN companies c ON c.id = m.company_id
                WHERE m.user_id = %s AND m.status = 'active'
                  AND m.deleted_at IS NULL AND c.deleted_at IS NULL""",
@@ -20,7 +21,8 @@ def me(user: dict = Depends(current_user)):
         out = []
         for m in memberships:
             roles = conn.execute(
-                """SELECT r.id, r.name, r.scope, r.permissions
+                """SELECT r.id, r.name, r.scope, r.permissions,
+                          r.grants, r.viewer_grants
                    FROM membership_roles mr JOIN roles r ON r.id = mr.role_id
                    WHERE mr.membership_id = %s AND r.deleted_at IS NULL""",
                 (m["membership_id"],),
@@ -33,9 +35,17 @@ def me(user: dict = Depends(current_user)):
             out.append({
                 "company_id": str(m["company_id"]),
                 "company_name": m["company_name"],
+                # grants / viewer_grants and can_grant_viewers are what the
+                # invite form needs to build its role list from the server
+                # instead of a hardcoded copy of §4.2 (USER-ROLES-SPEC §5).
+                # Absent until 2026-09-09 — see spec §11.
                 "roles": [{"id": str(r["id"]), "name": r["name"],
-                           "scope": r["scope"]} for r in roles],
+                           "scope": r["scope"],
+                           "grants": list(r["grants"] or []),
+                           "viewer_grants": list(r["viewer_grants"] or [])}
+                          for r in roles],
                 "permissions": {k: sorted(v) for k, v in effective.items()},
+                "can_grant_viewers": bool(m["can_grant_viewers"]),
             })
     return {
         "id": str(user["id"]), "email": user["email"], "name": user["name"],

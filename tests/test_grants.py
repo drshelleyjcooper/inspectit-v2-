@@ -559,3 +559,50 @@ def test_demoting_the_sole_admin_to_a_manager_is_refused(client, company):
         headers=_auth(company["token"]),
         json={"role_ids": [company["roles"]["Manager"]]})
     assert r.status_code == 409, r.text
+
+
+# --- §5 /me carries what the invite form needs ------------------------------
+
+def _my_membership(client, token, company_id):
+    me = client.get("/me", headers=_auth(token))
+    assert me.status_code == 200, me.text
+    return next(m for m in me.json()["memberships"]
+                if m["company_id"] == company_id)
+
+
+def test_me_returns_can_grant_viewers_and_follows_the_flag(client, company):
+    """§5 says /me must return the membership's can_grant_viewers or the
+    invite form can't build its list. It never did until 2026-09-09: the
+    frontend read `m.can_grant_viewers`, got undefined, and fell back to
+    false, so a domain manager never saw its viewer role in the form even
+    after an administrator enabled the flag (spec §11)."""
+    vm_email, vm = _add_member(client, company["id"], company["token"],
+                               company["roles"], ["Vehicle Manager"])
+    assert _my_membership(client, vm, company["id"])["can_grant_viewers"] is False
+
+    mid = _membership_id(client, company["id"], company["token"], vm_email)
+    r = client.patch(f"/companies/{company['id']}/members/{mid}",
+                     headers=_auth(company["token"]),
+                     json={"can_grant_viewers": True})
+    assert r.status_code == 200, r.text
+    assert _my_membership(client, vm, company["id"])["can_grant_viewers"] is True
+
+
+def test_me_returns_each_roles_grants(client, company):
+    """Each role in /me carries its grants and viewer_grants, matching the
+    seeded preset — so the UI can follow a backend change to §4.2 without a
+    hardcoded copy of the table."""
+    from api.presets import ROLE_PRESETS
+    want = {p["name"]: p for p in ROLE_PRESETS}
+
+    _, vm = _add_member(client, company["id"], company["token"],
+                        company["roles"], ["Vehicle Manager"])
+    roles = _my_membership(client, vm, company["id"])["roles"]
+    assert [r["name"] for r in roles] == ["Vehicle Manager"]
+    assert roles[0]["grants"] == want["Vehicle Manager"]["grants"]
+    assert roles[0]["viewer_grants"] == want["Vehicle Manager"]["viewer_grants"]
+
+    admin = _my_membership(client, company["token"], company["id"])["roles"]
+    assert admin[0]["name"] == "Company Administrator"
+    assert set(admin[0]["grants"]) == set(want["Company Administrator"]["grants"])
+    assert admin[0]["viewer_grants"] == []
