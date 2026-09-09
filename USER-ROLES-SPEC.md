@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.7 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.8 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,218 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -347,8 +347,8 @@ Two additions for v2.0:
   the UI follows" property that v1.1 established.
 
 *Corrected 2026-09-09:* neither field was returned until that date — see
-§11. Both now are; the frontend consumes `can_grant_viewers` already and
-still builds its role list from its own copy of §4.2 (§6 follow-up).
+§11. Both now are, and the invite form reads both from `/me`; the app's
+built-in table is the offline fallback.
 
 ---
 
@@ -801,6 +801,21 @@ frontend change. The grants do not yet: `grantableRoleIds()` still reads
 the app's hardcoded `ROLE_PRESETS`, so the "change a role in the backend,
 the UI follows" property §5 asks for needs a §6 follow-up that reads
 `role.grants` from `/me` instead. Suite now 1,218.
+
+*Closed the same day.* `web/inspectit-app.html` now reads each role's
+`grants` / `viewer_grants` from `/me` (`permReadGrants`, cached as
+`cloudCfg().grants` keyed by role id, captured at sign-in and on every
+`permsRefresh`). `grantableRoleIds()` takes the server copy for a held role
+when there is one and the built-in table otherwise — the same server-first,
+preset-fallback rule `myCanGrantViewers()` already used, so an older API
+that sends no grants degrades to the previous behaviour rather than to "may
+grant nobody". Verified in the served app signed in as the seeded Vehicle
+Manager: the list is inspector, maintenance and viewer; narrowing the cached
+server copy drops maintenance from the list; deleting the cache falls back
+to the table; a refresh restores the server copy. No console errors. The
+§5 property — change a role's grants in the backend, the invite form
+follows — now holds. The table's other uses (blurbs, ranks, local-only
+permissions, the §4.1 `assign` drift noted above) are unchanged.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather

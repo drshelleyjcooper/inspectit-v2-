@@ -707,7 +707,13 @@ const READ    = ["view", "print"];
    because the three domain managers are siblings at one tier: a Property
    Manager must not reach a Vehicle Inspector. `viewerGrants` folds in only when
    the server says this membership has can_grant_viewers.
-   Authoritative source: USER-ROLES-SPEC v2.0 §4.1 and §4.2. */
+
+   Since 2026-09-09 /me returns each role's grants and viewer_grants, and
+   grantableRoleIds() prefers those (cached in cloudCfg().grants, keyed by role
+   id). The lists below are the offline fallback and the source of blurbs,
+   ranks and permissions for local-only use — a change to a role's grants in
+   the backend reaches the invite form without touching this file (spec §5).
+   Transcribed from USER-ROLES-SPEC §4.1 and §4.2. */
 const ROLE_PRESETS = {
   company_admin: {
     id: "company_admin", name: "Company Administrator", rank: 100, scope: "company",
@@ -944,13 +950,19 @@ function myCanGrantViewers() {
 }
 
 /* Union across every role held: someone who is both Vehicle and Property
-   Manager may add either domain's people. */
+   Manager may add either domain's people.
+
+   Each held role's grants come from the server copy /me sent (cached in
+   cloudCfg().grants) when there is one, else from the built-in table — the
+   same server-first, preset-fallback rule myCanGrantViewers() uses. */
 function grantableRoleIds() {
   if (!permsActive()) return ROLE_ORDER.slice();
   const withViewers = myCanGrantViewers();
+  const c = cloudCfg();
+  const fromServer = (c && c.grants && typeof c.grants === "object") ? c.grants : null;
   const out = [];
   myRoleIds().forEach(id => {
-    const r = ROLE_PRESETS[id];
+    const r = (fromServer && fromServer[id]) || ROLE_PRESETS[id];
     if (!r) return;
     (r.grants || []).forEach(g => { if (out.indexOf(g) === -1) out.push(g); });
     if (withViewers) (r.viewerGrants || []).forEach(g => {
@@ -1057,6 +1069,10 @@ async function permsRefresh() {
     /* Per-membership override (§2.5) — the only permission that isn't
        derived from the role blob. */
     if (typeof m.can_grant_viewers === "boolean") cur.canGrantViewers = m.can_grant_viewers;
+    /* Each role's grants, from the server (§5). Null = not sent; keep the
+       previous cached copy if any so an old API doesn't wipe it. */
+    const grants = permReadGrants(m);
+    if (grants) cur.grants = grants;
     cur.companyName = m.company_name || cur.companyName;
     cloudSaveCfg(cur);
     applyPerms();
@@ -1070,6 +1086,29 @@ function permReadRoles(m) {
   return (Array.isArray(raw) ? raw : [raw])
     .map(r => (typeof r === "string" ? r : (r && (r.name || r.id))))
     .filter(Boolean);
+}
+
+/* /me's roles carry `grants` and `viewer_grants` as role NAMES. Map both to
+   role ids, keyed by the held role's id. Returns null when the server sent no
+   grants at all (an older API) so callers fall back to the built-in table
+   rather than treating "unknown" as "may grant nobody". */
+function permReadGrants(m) {
+  const roles = m && m.roles;
+  if (!Array.isArray(roles)) return null;
+  const out = {};
+  let any = false;
+  roles.forEach(r => {
+    if (!r || typeof r !== "object" || !Array.isArray(r.grants)) return;
+    const id = roleKey(r.name || r.id);
+    if (!id) return;
+    any = true;
+    out[id] = {
+      grants: r.grants.map(roleKey).filter(Boolean),
+      viewerGrants: (Array.isArray(r.viewer_grants) ? r.viewer_grants : [])
+        .map(roleKey).filter(Boolean)
+    };
+  });
+  return any ? out : null;
 }
 
 function permReadBlob(m) {
@@ -1318,6 +1357,8 @@ async function cloudSignIn(api, email, password) {
                  company: m.company_id, companyName: m.company_name,
                  userId: me.id || me.user_id || null, userName: me.name || null,
                  roles: permReadRoles(m), permissions: permReadBlob(m),
+                 canGrantViewers: typeof m.can_grant_viewers === "boolean" ? m.can_grant_viewers : undefined,
+                 grants: permReadGrants(m) || undefined,
                  meta: {}, pending: {} });
   await cloudSyncNow(true);
 }
