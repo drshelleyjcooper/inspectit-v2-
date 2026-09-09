@@ -623,8 +623,9 @@ created, and no unique-constraint error surfaced.
 - **Re-seeding.** Drift a seeded preset row, re-seed, and assert it is
   updated rather than skipped by the upsert-by-name; that a second run is a
   no-op; that every column the `DO UPDATE SET` names is refreshed; and that a
-  company-owned role sharing a preset's name is untouched. There is no preset
-  version to bump — see §11. `test_presets.py`.
+  company-owned role sharing a preset's name is untouched. `PRESET_VERSION`
+  exists but is inert; re-seeding does not key on it — see §11.
+  `test_presets.py`.
 
 ### 9.4 Frontend
 
@@ -693,8 +694,12 @@ clause to `DO UPDATE SET` over scope, permissions, grants, viewer_grants and
 updated_at, and the migration header in `004_role_grants.sql` and the
 docstring on `seed_role_presets` both record that — but §7.1 was never
 updated, and the §9.3 bullet kept asking for a version bump that nothing
-implements. The blocker is closed; there is no preset version and none is
-needed.
+implements. The blocker is closed. A `PRESET_VERSION = 2` constant does
+exist in `presets.py` (added in the same commit), but nothing reads it: it
+is not logged at boot despite its comment and `SPEC-UPDATE-2026-09-03.md`
+saying so, no test asserts it, and the seeder does not key on it — the
+`DO UPDATE` runs unconditionally every boot. Correction 2026-09-09 to the
+first draft of this entry, which said no such constant existed.
 
 Two framing slips corrected while pinning it. Presets are global rows
 (`company_id IS NULL`), so drift would hit every company at once rather than
