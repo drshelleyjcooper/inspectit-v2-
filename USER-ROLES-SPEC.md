@@ -1,7 +1,8 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.1 · **Date:** 2026-08-31 · **Status:** specified, settled, and
-written — patches drafted for every step in §8, not yet applied or run
+**Version:** 2.3 · **Date:** 2026-09-08 · **Status:** specified, settled,
+written, and applied — every step in §8 is committed on `user-roles-v2` with
+the full suite green (1,209 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
 **Source of truth for the matrix:** this document. `User_Roles_Chart.pdf` is
 now historical — the decisions in §2 go beyond what the chart covers.
@@ -434,7 +435,7 @@ already works, so the partial unique index exists in `001_initial.sql`.
 
 ### 7.4 `api/routers/members.py`
 
-Five changes, all on the invitation path:
+Four changes (item 3 turned out to need no work), all on the invitation path:
 
 1. **Enforce grants server-side.** A hidden dropdown option is not a control;
    reject a `role_ids` the caller may not issue.
@@ -459,6 +460,12 @@ invitation expiry.
 
 Three of these are consequences of giving five roles `company:assign`, which
 v1.1 gave to one. They are not optional.
+
+**All five were applied 2026-09-03** — `_assert_may_manage` in both
+`update_member` and `remove_member`, `_other_admins` re-keyed to
+`ADMIN = ANY(r.grants)`, `require_any` on `GET /invitations`, the
+`create_invitation` 409 narrowed to "nothing new to add", and `deleted_at =
+NULL` in the accept-route upsert.
 
 - **`update_member` and `remove_member` are gated on `company:assign` alone.**
   That was the whole check when only Company Administrator held it. Under v2.0
@@ -500,6 +507,23 @@ v1.1 gave to one. They are not optional.
 5. **Tests** — §9. The suite asserts against the eight-role model and will not
    catch v2.0 regressions until it's rewritten.
 
+**Status as of 2026-09-03 — all five steps applied on branch `user-roles-v2`:**
+
+| Step | State | Commits |
+|---|---|---|
+| 1. Vocabulary | applied earlier | — |
+| 2. Migration + `presets.py` | applied earlier | migration 004 runs clean; psycopg3 list→`text[]` adaptation verified on live start |
+| 3. `permissions.py` + members router | applied 2026-09-03 | `30626de`, `26e1f73`, `4eb81a4`, `b2e6ee4` |
+| 4. Frontend | applied earlier | `inspectit-app.html`, +1,266 lines |
+| 5. Tests | applied earlier | `test_role_matrix.py` (246 lines), `test_grants.py` (44 tests) |
+
+Step 3 landed as four edits: `permissions.py` wholesale,
+`BLOCKED_COMBINATIONS` into `presets.py`, eight sites in
+`api/routers/members.py`, and the acceptance-time re-check in
+`api/routers/auth.py`. The two `auth.py` items §7.4 called for were already
+present — merge-on-accept via the existing `ON CONFLICT` upsert, and the
+`deleted_at = NULL` fix.
+
 Step 2 has a dependency worth knowing about. BACKEND-ANALYSIS §3 records that
 assigned-scope roles can't use collection sync at all; they're waiting on the
 per-record API. Flipping the inspectors to company scope is what makes them
@@ -510,12 +534,13 @@ nothing.** That puts step 2 ahead of the cosmetic invitation fixes.
 
 ## 9. Testing
 
-The suite is 34 end-to-end tests against a throwaway database: auth flows, role
-permissions, scoped data access, backup import/export, collection sync,
-production hardening. The auth, import, sync and hardening groups are unaffected
-by v2.0. The permission and scoping groups are written against the eight-role
-model and need rewriting — this is real work sitting outside §7, and it's the
-part most likely to be underestimated.
+**The rewrite described below is done.** The suite is now 1,209 tests against a
+throwaway database, up from 34: the original groups plus `test_role_matrix.py`
+(the §4.1 grid, table-driven, 246 lines) and `test_grants.py` (44 tests
+covering §9.2). All green as of 2026-09-03.
+
+What follows is kept as the record of what was built and why, not as work
+outstanding.
 
 ### 9.1 The rewrite risk: passing vacuously
 
@@ -542,18 +567,18 @@ None of this is covered today, because delegated granting didn't exist.
 directly rather than through the UI, since a greyed-out dropdown option is not
 a control:
 
-- Vehicle Manager → Vehicle Inspector: **201**
+- Vehicle Manager → Vehicle Inspector: **200**
 - Vehicle Manager → Property Inspector: **403** (crosses the domain)
 - Vehicle Manager → Vehicle Manager: **403** (peer)
 - Domain manager → company-wide Viewer: **403**
 - Manager → Manager, and Manager → Company Administrator: **403**
-- Company Administrator → any of the thirteen: **201**
+- Company Administrator → any of the thirteen: **200**
 - Project Manager → anything, viewer flag off: **403**
 
 **The viewer flag** (§2.5):
 
 - `can_grant_viewers = false`, Vehicle Manager → Vehicle Viewer: **403**
-- Admin flips it via `PATCH /members/{id}`, same request: **201**
+- Admin flips it via `PATCH /members/{id}`, same request: **200**
 - Non-admin attempting the flip: **403**
 - Two Vehicle Managers in one company with different flag values behave
   differently — the override is per-membership, not per-role
@@ -629,7 +654,29 @@ A server gap is a security bug. Weight the effort accordingly.
 
 ## 11. Open items
 
-Everything in §4 is decided. One item remains, and nothing here waits on it:
+Everything in §4 is decided. One item remains, and nothing here waits on it.
+
+**Retracted 2026-09-08 — `_grants_user_management`.** v2.2 recorded this as an
+open item: the predicate was said to still test `company:assign` while its
+sibling `_other_admins` had been re-keyed, leaving the last-admin guard
+skippable by demoting a sole Company Administrator to Vehicle Manager. **Wrong
+on every point.** Both predicates were re-keyed to `ADMIN = ANY(grants)` in the
+same 2026-09-03 pass, and the comment on the function records that fix citing
+§7.5 — it was misread as a warning that the fix was missing rather than a note
+that it had landed. The case was also already covered:
+`test_demoting_the_sole_admin_to_a_domain_manager_is_refused` and
+`test_the_sole_admin_is_still_left_administrable_after_the_refusal` have been
+green since 2026-09-03, which is also why `test_grants.py` was 43 tests rather
+than the 41 first recorded above.
+
+One real gap came out of it. Manager also holds `company:assign` and §4.2
+refuses `Manager → Company Administrator`, so the same stranding applies to
+that role, and nothing tested it.
+`test_demoting_the_sole_admin_to_a_manager_is_refused` closes it — commit
+`11c578a`, suite now 1,209.
+
+Kept rather than deleted so the next reader doesn't re-derive the same
+suspicion from the same comment.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather
