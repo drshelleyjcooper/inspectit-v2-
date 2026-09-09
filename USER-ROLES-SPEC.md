@@ -1,8 +1,8 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.3 · **Date:** 2026-09-08 · **Status:** specified, settled,
+**Version:** 2.4 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
-the full suite green (1,209 tests)
+the full suite green (1,213 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
 **Source of truth for the matrix:** this document. `User_Roles_Chart.pdf` is
 now historical — the decisions in §2 go beyond what the chart covers.
@@ -401,6 +401,10 @@ existing companies keep their old permission JSON — which for Vehicle Inspecto
 still includes maintenance. Bump a preset version and force a re-seed on
 deploy.
 
+*Closed 2026-09-03, recorded 2026-09-09.* The paragraph above described the
+v1.1 seeder. Step 3 fixed it by changing the conflict clause to
+`DO UPDATE SET`, not by versioning — see the retraction in §11.
+
 The two inspector presets *lose* a module, so anyone currently working
 maintenance as an inspector would lose that access at re-seed. **Confirmed
 2026-08-31: no live company is affected** — nothing is deployed yet. If that
@@ -616,9 +620,11 @@ created, and no unique-constraint error surfaced.
   but nothing routes through them until the per-record API lands — so a preset
   that sets `scope='assigned'` is a bug until then.
 - **Domain viewers read repairs and warranties but cannot edit them** (§2.4).
-- **Re-seeding.** Bump the preset version, force a re-seed, assert an existing
-  company's role rows are updated rather than skipped by the upsert-by-name,
-  and that a second run is a no-op.
+- **Re-seeding.** Drift a seeded preset row, re-seed, and assert it is
+  updated rather than skipped by the upsert-by-name; that a second run is a
+  no-op; that every column the `DO UPDATE SET` names is refreshed; and that a
+  company-owned role sharing a preset's name is untouched. There is no preset
+  version to bump — see §11. `test_presets.py`.
 
 ### 9.4 Frontend
 
@@ -677,6 +683,28 @@ that role, and nothing tested it.
 
 Kept rather than deleted so the next reader doesn't re-derive the same
 suspicion from the same comment.
+
+**Retracted 2026-09-09 — the §7.1 re-seed blocker.** §7.1 says the seeder
+"upserts by name, so existing companies keep their old permission JSON" and
+asks for a preset version bump plus a forced re-seed on deploy. That described
+the v1.1 seeder accurately: its clause was `ON CONFLICT ... DO NOTHING`. The
+same 2026-09-03 pass that shipped step 3 (`61a007a`) closed it by changing the
+clause to `DO UPDATE SET` over scope, permissions, grants, viewer_grants and
+updated_at, and the migration header in `004_role_grants.sql` and the
+docstring on `seed_role_presets` both record that — but §7.1 was never
+updated, and the §9.3 bullet kept asking for a version bump that nothing
+implements. The blocker is closed; there is no preset version and none is
+needed.
+
+Two framing slips corrected while pinning it. Presets are global rows
+(`company_id IS NULL`), so drift would hit every company at once rather than
+"existing companies" one by one. And the partial index
+`uq_roles_preset_name` is the whole conflict target, so a company-owned role
+may share a preset's name and is untouched by re-seeding — true, but nothing
+had tested it. `test_presets.py` pins all four behaviours (drift is
+repaired, a clean run is a no-op, every mutable column refreshes, custom
+roles are left alone); the drift test was verified to fail against
+`DO NOTHING`. Commit `6cd280a` and its follow-up; suite now 1,213.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather
