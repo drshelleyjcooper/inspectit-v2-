@@ -1,8 +1,8 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.8 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.9 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
-the full suite green (1,218 tests)
+the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
 **Source of truth for the matrix:** this document. `User_Roles_Chart.pdf` is
 now historical — the decisions in §2 go beyond what the chart covers.
@@ -268,7 +268,8 @@ Notes on individual cells:
 
 - **`delete` appears in one row only.** Company Administrator. Inspection
   reports are records; the person who filed one shouldn't erase it. Paired with
-  the audit log.
+  the audit log. *Enforced on the collection PUT since 2026-09-09 — it was
+  not before; see §11.*
 - **`company:assign` on the domain managers** lets them open the invite form.
   It does not say what they may issue — `grants` does.
 - **No domain manager holds `company:admin`**, so no domain manager can export
@@ -780,6 +781,40 @@ table in `web/inspectit-app.html` (`permBlob(..., FULL/NO_DEL, ...)`) has the
 same drift and is NOT changed here — cosmetic under §5, and no control in
 the app is gated on an `assign` cell at all: the invite form keys on
 `grants` via `grantableRoleIds()`.
+
+**Bug found and fixed 2026-09-09 — every role could delete records.** Brandon's
+manual pass with the seeded company: signed in as any role, the history views
+offered Delete on past inspections, repair tickets, warranties, maintenance
+spend entries and project sub-records, and it worked. Two layers, both real:
+
+- **Server.** Sync is collection-level (§2.7), and the PUT in
+  `api/routers/collections.py` required only `module:edit`. It never compared
+  the incoming blob with the stored one, so a removed record was
+  indistinguishable from a changed one and every role with `edit` — all of
+  them except the viewers — could erase anything in the module. This is the
+  enforcement gap, since §5 makes the server the enforcement point. Fixed:
+  for the record-bearing keys (`DELETE_TRACKED`: vehicles, inspections,
+  tickets, spend, warranties, properties and their equivalents, projects) PUT
+  now diffs stored against incoming and returns 403 naming `module:delete`
+  when anything is gone; an administrator's removal is audited as a `delete`
+  with the count. Records with an `id` match by it, including a project's
+  id-bearing sub-record lists; id-less lists (inspection summaries, spend
+  entries — the app removes those by index) count a shorter list as that
+  many deletions. Still an edit, deliberately: the maintenance state maps
+  (clearing "last done" is a control, not a record), saved schedule
+  templates, diagrams, profile, projectMeta, and id-less child lists inside a
+  record such as attachments. Five tests in `test_collections.py`.
+- **App.** Only the vehicle, property and project head deletes carried a
+  `delete` gate. Every record-level Delete now carries
+  `data-perm="<module>:delete"` and the gating pass runs after each of those
+  views renders (it previously ran only on sign-in and app open), so
+  non-administrators see no Delete rather than a refusal. Left ungated as
+  configuration rather than records, matching the server: "Delete schedule"
+  and the category/item deletes inside the template editor.
+
+Behaviour change to expect: an inspector or manager who deletes a record in
+the app now gets a refusal at sync and the server copy wins on the next pull,
+which is §4.1 as written. Suite now 1,223.
 
 **Open after the same sweep, decision needed (not changed):**
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`

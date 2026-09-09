@@ -9,6 +9,13 @@ Permission mapping: each key belongs to a module; GET needs module:view,
 PUT needs module:edit — and both require a company-scope grant, because a
 whole-collection blob can't be filtered per assignment. (Assigned-scope
 roles like inspectors will use the per-record API when that lands.)
+
+Delete (USER-ROLES-SPEC §4.1: Company Administrator only): a whole-collection
+write can't say "I removed a record" — until 2026-09-09 it didn't have to,
+and every role with module:edit could erase inspections, tickets and the
+rest by writing the collection back without them. PUT now diffs the stored
+copy against the incoming one for the record-bearing keys in DELETE_TRACKED
+and requires module:delete when anything is gone (spec §11).
 """
 import json
 from typing import Any, Optional
@@ -49,6 +56,79 @@ KEY_MODULE = {
 
 # Local-only keys that must never reach the server.
 FORBIDDEN_KEYS = {"account", "session", "users", "cloud"}
+
+# Keys whose contents are RECORDS in the §4.1 sense — an inspection report, a
+# repair ticket, a warranty, a spend entry, a vehicle, a project and its
+# sub-records. Removing one is a delete. Not listed, and so still an edit:
+# the maintenance state maps (clearing "last done" is an ordinary control),
+# saved schedule templates, diagrams, profile and projectMeta.
+DELETE_TRACKED = {
+    "vehicles", "inspections", "tickets", "vehicleMaintSpend",
+    "vehicleWarranties",
+    "properties", "propertyInspections", "propertyTickets",
+    "propertyMaintSpend", "propertyWarranties",
+    "projects",
+}
+
+
+def _as_json(v):
+    """The app's export format stores some values as JSON strings."""
+    if isinstance(v, str):
+        try:
+            return json.loads(v)
+        except ValueError:
+            return v
+    return v
+
+
+def _has_ids(items) -> bool:
+    return any(isinstance(x, dict) and "id" in x for x in items)
+
+
+def _removed_nested(old_rec, new_rec) -> int:
+    """Inside a matched record, only id-bearing child lists count as records
+    (a project's payments, contractors, permits …). Id-less child lists —
+    attachments, photos — are part of editing the record."""
+    n = 0
+    for k, v in old_rec.items():
+        if isinstance(v, list) and _has_ids(v):
+            nv = new_rec.get(k) if isinstance(new_rec, dict) else None
+            n += _removed_records(v, nv if isinstance(nv, list) else [])
+    return n
+
+
+def _removed_records(old, new) -> int:
+    """Count records present in `old` that are absent from `new`.
+
+    Shapes seen in practice: a list of id-bearing dicts (vehicles, properties,
+    projects, warranties, tickets); a dict keyed by entity id whose values are
+    lists (inspections, tickets, spend); and within a record, id-bearing child
+    lists. Records with an `id` are matched by it. Lists whose items have no
+    id (inspection summaries, spend entries — the app removes those by index)
+    count a shorter list as that many deletions; that treats "replace one
+    id-less entry with another" as an edit, which is the lenient reading."""
+    old, new = _as_json(old), _as_json(new)
+    if isinstance(old, dict):
+        if not isinstance(new, dict):
+            new = {}
+        return sum(_removed_records(v, new.get(k)) for k, v in old.items())
+    if isinstance(old, list):
+        if not isinstance(new, list):
+            new = []
+        if _has_ids(old):
+            new_by_id = {x["id"]: x for x in new
+                         if isinstance(x, dict) and "id" in x}
+            n = 0
+            for x in old:
+                if not (isinstance(x, dict) and "id" in x):
+                    continue
+                if x["id"] not in new_by_id:
+                    n += 1
+                else:
+                    n += _removed_nested(x, new_by_id[x["id"]])
+            return n
+        return max(0, len(old) - len(new))
+    return 0
 
 
 def _check(ctx: AuthContext, key: str, action: str):
@@ -128,6 +208,14 @@ def put_collection(key: str, body: PutCollectionIn,
                            "server_updated_at":
                                current["updated_at"].isoformat()}
             raise HTTPException(409, return_data)
+        removed = 0
+        if key in DELETE_TRACKED and current is not None:
+            removed = _removed_records(current["data"], body.data)
+            if removed and ctx.grant_scope(KEY_MODULE[key], "delete") != "company":
+                raise HTTPException(
+                    403, f"Requires {KEY_MODULE[key]}:delete — this write "
+                         f"would remove {removed} record(s), and only "
+                         "Company Administrator may delete (§4.1)")
         row = conn.execute(
             """INSERT INTO app_collections (company_id, key, data, updated_by)
                VALUES (%s, %s, %s, %s)
@@ -139,4 +227,7 @@ def put_collection(key: str, body: PutCollectionIn,
         ).fetchone()
         audit(conn, ctx.company_id, ctx.user["id"], "update", "collection",
               None, {"key": key, "bytes": size})
+        if removed:
+            audit(conn, ctx.company_id, ctx.user["id"], "delete", "collection",
+                  None, {"key": key, "removed": removed})
     return {"key": key, "updated_at": row["updated_at"].isoformat()}

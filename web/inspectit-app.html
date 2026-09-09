@@ -3130,7 +3130,7 @@ function renderVehHistory(root) {
         </div>
         <div class="ir-actions">
           ${canView ? `<button class="ghost" data-view-report="${i}">View report</button>` : `<span class="ir-norec">No saved report</span>`}
-          <button class="iconbtn danger" data-del-insp="${i}" title="Delete this record">Delete</button>
+          <button class="iconbtn danger" data-perm="vehicle_inspections:delete" data-del-insp="${i}" title="Delete this record">Delete</button>
         </div>
       </div>`;
   }).join("");
@@ -3159,6 +3159,7 @@ function renderVehHistory(root) {
     if (insp && insp.record) viewPastReport(insp.record);
   });
   root.querySelectorAll("[data-del-insp]").forEach(b => b.onclick = () => deleteInspection(v.id, Number(b.dataset.delInsp)));
+  applyPerms(root);   // §4.1: delete is Company Administrator only
 }
 
 /* ====================== REPAIR TICKETS ====================== */
@@ -3279,7 +3280,7 @@ function renderRepairList(root, v, tm) {
         </div>
         <div class="rr-actions">
           <span class="rep-cost">${money(t.cost)}</span>
-          <button class="iconbtn danger" data-del-ticket="${esc(t.id)}" title="Delete ticket">Delete</button>
+          <button class="iconbtn danger" data-perm="vehicle_repairs:delete" data-del-ticket="${esc(t.id)}" title="Delete ticket">Delete</button>
         </div>
       </div>`;
   }).join("");
@@ -3329,6 +3330,7 @@ function renderRepairList(root, v, tm) {
   $("repRange").onchange = e => { repairFilter = e.target.value; renderVehicles(); };
   root.querySelectorAll("[data-open-ticket]").forEach(b => b.onclick = () => { repairView = { mode: "form", editId: b.dataset.openTicket }; renderVehicles(); });
   root.querySelectorAll("[data-del-ticket]").forEach(b => b.onclick = () => deleteTicket(v.id, b.dataset.delTicket));
+  applyPerms(root);   // §4.1: delete is Company Administrator only
 }
 
 function latestInspectionFlagged(vehId) {
@@ -3985,7 +3987,7 @@ function renderPropHistory(root) {
         </div>
         <div class="ir-actions">
           ${canView ? `<button class="ghost" data-view-report="${i}">View report</button>` : `<span class="ir-norec">No saved report</span>`}
-          <button class="iconbtn danger" data-del-insp="${i}" title="Delete this record">Delete</button>
+          <button class="iconbtn danger" data-perm="property_inspections:delete" data-del-insp="${i}" title="Delete this record">Delete</button>
         </div>
       </div>`;
   }).join("");
@@ -4006,6 +4008,7 @@ function renderPropHistory(root) {
     if (insp && insp.record) viewPastReport(insp.record);
   });
   root.querySelectorAll("[data-del-insp]").forEach(b => b.onclick = () => deletePropInspection(p.id, Number(b.dataset.delInsp)));
+  applyPerms(root);   // §4.1: delete is Company Administrator only
 }
 
 /* ----- repair tickets (property; no odometer) ----- */
@@ -4100,7 +4103,7 @@ function renderPropRepairList(root, p, tm) {
         </div>
         <div class="rr-actions">
           <span class="rep-cost">${money(t.cost)}</span>
-          <button class="iconbtn danger" data-del-ticket="${esc(t.id)}" title="Delete ticket">Delete</button>
+          <button class="iconbtn danger" data-perm="property_repairs:delete" data-del-ticket="${esc(t.id)}" title="Delete ticket">Delete</button>
         </div>
       </div>`;
   }).join("");
@@ -4142,6 +4145,7 @@ function renderPropRepairList(root, p, tm) {
   $("repRange").onchange = e => { propRepairFilter = e.target.value; renderProperties(); };
   root.querySelectorAll("[data-open-ticket]").forEach(b => b.onclick = () => { propRepairView = { mode: "form", editId: b.dataset.openTicket }; renderProperties(); });
   root.querySelectorAll("[data-del-ticket]").forEach(b => b.onclick = () => deletePropTicket(p.id, b.dataset.delTicket));
+  applyPerms(root);   // §4.1: delete is Company Administrator only
 }
 
 // Most recent property inspection with any attention/defect items, for the
@@ -4599,7 +4603,7 @@ function makeScheduler(cfg) {
           const hist = spendByKey[key];
           const histBox = hist ? `<div class="mr-histbox" style="display:none;">
                 ${hist.slice().sort((a, b) => String(b.m.date || "").localeCompare(String(a.m.date || ""))).map(h =>
-                  `<div class="mh-row"><span>${esc(h.m.date || "—")}</span><span>${rmFmt(h.m.cost)}</span>${h.m.odo != null ? `<span>${milesFmt(h.m.odo)} mi</span>` : ""}<button type="button" class="mh-rm" data-idx="${h.i}" title="Remove this entry from the history">✕</button></div>`).join("")}
+                  `<div class="mh-row"><span>${esc(h.m.date || "—")}</span><span>${rmFmt(h.m.cost)}</span>${h.m.odo != null ? `<span>${milesFmt(h.m.odo)} mi</span>` : ""}<button type="button" class="mh-rm" data-perm="${cfg.module}:delete" data-idx="${h.i}" title="Remove this entry from the history">✕</button></div>`).join("")}
                 <div class="mh-total">Item total: ${rmFmt(hist.reduce((s, h) => s + (Number(h.m.cost) || 0), 0))}</div>
               </div>` : "";
           return `
@@ -4693,6 +4697,7 @@ function makeScheduler(cfg) {
         box.style.display = show ? "" : "none";
         el.textContent = el.textContent.replace(show ? "▸" : "▾", show ? "▾" : "▸");
       });
+      applyPerms(root);   // §4.1: removing a spend entry is a delete
       root.querySelectorAll(".mh-rm").forEach(el => el.onclick = () => {
         if (!confirm("Remove this cost entry from the history?")) return;
         const all = getJSON(cfg.spendKey, {});
@@ -4713,6 +4718,7 @@ const propSched = makeScheduler({
   tmplKey: K.propertyMaintTemplates,
   defaultKey: "__prop_maint_default__",
   spendKey: K.propertyMaintSpend,
+  module: "property_maintenance",   // gates the history ✕ (§4.1 delete)
   backLabel: "Back to properties",
   backFn: propReset,
   rerender: renderProperties,
@@ -4859,6 +4865,7 @@ const vehSched = makeScheduler({
   tmplKey: K.vehicleMaintTemplates,
   defaultKey: "__veh_maint_default__",
   spendKey: K.vehicleMaintSpend,
+  module: "vehicle_maintenance",    // gates the history ✕ (§4.1 delete)
   backLabel: "Back to vehicles",
   backFn: vehReset,
   rerender: renderVehicles,
@@ -5009,7 +5016,7 @@ function makeWarranties(cfg) {
             </div>
           </div>
           <div class="rr-actions">
-            <button class="iconbtn danger" data-del-warr="${esc(r.id)}" title="Delete record">Delete</button>
+            <button class="iconbtn danger" data-perm="${cfg.module}:delete" data-del-warr="${esc(r.id)}" title="Delete record">Delete</button>
           </div>
         </div>`;
     }).join("");
@@ -5028,6 +5035,7 @@ function makeWarranties(cfg) {
     root.querySelector("#newWarrBtn").onclick = () => { V.mode = "form"; V.editId = null; cfg.rerender(); };
     root.querySelectorAll("[data-open-warr]").forEach(b => b.onclick = () => { V.mode = "form"; V.editId = b.dataset.openWarr; cfg.rerender(); });
     root.querySelectorAll("[data-del-warr]").forEach(b => b.onclick = () => del(cfg.idOf(entity), b.dataset.delWarr));
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   }
 
   function renderForm(root, entity, tm) {
@@ -5112,6 +5120,7 @@ function makeWarranties(cfg) {
 
 const propWarr = makeWarranties({
   storeKey: K.propertyWarranties,
+  module: "property_warranties",    // gates Delete on a record (§4.1)
   entityWord: "property",
   backLabel: "Back to properties",
   backFn: propReset,
@@ -5126,6 +5135,7 @@ function renderPropWarranty(root, p, tm) { propWarr.render(root, p, tm); }
 
 const vehWarr = makeWarranties({
   storeKey: K.vehicleWarranties,
+  module: "vehicle_warranties",     // gates Delete on a record (§4.1)
   entityWord: "vehicle",
   backLabel: "Back to vehicles",
   backFn: vehReset,
@@ -5427,7 +5437,7 @@ function projRowHtml(row, editMode) {
   const head = editMode
     ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
         <input type="text" value="${esc(row.label)}" data-row-label="${esc(row.id)}" placeholder="Category name" style="flex:1; font-weight:600;">
-        <button class="iconbtn danger" data-row-del="${esc(row.id)}" title="Delete category">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-row-del="${esc(row.id)}" title="Delete category">Delete</button>
       </div>`
     : `<div style="font-weight:600; margin-bottom:8px;">${esc(row.label || "Untitled")}</div>`;
   return `<div style="border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px;">
@@ -5500,6 +5510,7 @@ function projBindSections(root, pid) {
   root.querySelectorAll("[data-row-label]").forEach(inp => inp.onchange = () => projMutateRow(pid, inp.dataset.rowLabel, r => r.label = inp.value.trim()));
   root.querySelectorAll("[data-row-desc]").forEach(ta => ta.onchange = () => projMutateRow(pid, ta.dataset.rowDesc, r => r.desc = ta.value));
   root.querySelectorAll("[data-row-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this item?")) return; projDeleteRow(pid, b.dataset.rowDel); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-row-addatt]").forEach(b => b.onclick = () => root.querySelector(`[data-row-attinput="${b.dataset.rowAddatt}"]`).click());
   root.querySelectorAll("[data-row-attinput]").forEach(inp => inp.onchange = e => projRowAttUpload(pid, inp.dataset.rowAttinput, e));
   root.querySelectorAll("[data-att-rm]").forEach(b => b.onclick = () => { const [rowId, idx] = b.dataset.attRm.split("|"); projMutateRow(pid, rowId, r => r.atts.splice(Number(idx), 1)); renderProjects(); });
@@ -5684,7 +5695,7 @@ function projCostRowHtml(e, cats) {
       ${sel}
       <input type="text" data-cost-desc="${esc(e.id)}" placeholder="Description" value="${esc(e.desc || "")}" style="flex:1; min-width:160px;">
       <input type="text" inputmode="decimal" data-cost-amt="${esc(e.id)}" placeholder="0.00" value="${esc(projGroupNum(e.amount))}" style="width:140px;">
-      <button class="iconbtn danger" data-cost-del="${esc(e.id)}" title="Delete line item">Delete</button>
+      <button class="iconbtn danger" data-perm="projects:delete" data-cost-del="${esc(e.id)}" title="Delete line item">Delete</button>
     </div>`;
 }
 function projBindCosts(root, pid) {
@@ -5712,6 +5723,7 @@ function projBindCosts(root, pid) {
   projBindRegroup(root, pid, "data-cost-row", "estimates", projSortEstimates, () => projUpdateCostBreakdown(root));
   root.querySelectorAll("[data-cost-desc]").forEach(inp => inp.onchange = () => projPatchEstimate(pid, inp.dataset.costDesc, e => e.desc = inp.value));
   root.querySelectorAll("[data-cost-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this line item?")) return; projPatch(pid, p => { p.estimates = (p.estimates || []).filter(e => e.id !== b.dataset.costDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-cost-amt]").forEach(inp => projBindMoneyInput(
     inp,
     norm => projPatchEstimate(pid, inp.dataset.costAmt, e => e.amount = norm),
@@ -5755,7 +5767,7 @@ function projPaymentRowHtml(p, ptypes) {
         </select>
         <label style="display:flex; align-items:center; gap:6px; white-space:nowrap;"><input type="checkbox" data-pay-paid="${esc(p.id)}" ${p.paid ? "checked" : ""}> Paid</label>
         <button type="button" class="ghost" data-pay-addatt="${esc(p.id)}" style="padding:6px 12px;">Receipt (PDF)</button>
-        <button class="iconbtn danger" data-pay-del="${esc(p.id)}" title="Delete payment">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-pay-del="${esc(p.id)}" title="Delete payment">Delete</button>
       </div>
       <input type="file" class="hidden" data-pay-attinput="${esc(p.id)}" accept="application/pdf,.pdf" multiple>
       <ul class="att-list" data-pay-attlist="${esc(p.id)}">${atts}</ul>
@@ -5798,6 +5810,7 @@ function projUpdatePaymentTotals(root) {
 function projBindPayments(root, pid) {
   root.querySelectorAll("[data-pay-add]").forEach(b => b.onclick = () => { projPatch(pid, p => { p.payments = p.payments || []; p.payments.push({ id: projUid(), desc: "", amount: "", due: "", ptype: "", paid: false, atts: [] }); }); renderProjects(); });
   root.querySelectorAll("[data-pay-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this payment?")) return; projPatch(pid, p => { p.payments = (p.payments || []).filter(x => x.id !== b.dataset.payDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-pay-desc]").forEach(inp => inp.onchange = () => projPatchPayment(pid, inp.dataset.payDesc, p => p.desc = inp.value));
   root.querySelectorAll("[data-pay-due]").forEach(inp => inp.onchange = () => projPatchPayment(pid, inp.dataset.payDue, p => p.due = inp.value));
   root.querySelectorAll("[data-pay-paid]").forEach(inp => inp.onchange = () => { projPatchPayment(pid, inp.dataset.payPaid, p => p.paid = inp.checked); projUpdatePaymentTotals(root); });
@@ -5870,7 +5883,7 @@ function projContractorHtml(c, ctypes) {
           <option value="__add__">+ Add new type…</option>
         </select>
         <span style="flex:1;"></span>
-        <button class="iconbtn danger" data-con-del="${esc(c.id)}" title="Delete contractor">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-con-del="${esc(c.id)}" title="Delete contractor">Delete</button>
       </div>
       <div class="grid2">${fields}</div>
       <div style="margin-top:12px; font-weight:600; color:var(--muted); font-size:14px;">Documents (PDF)</div>
@@ -5924,6 +5937,7 @@ function projBindContractors(root, pid) {
     if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus(); }
   });
   root.querySelectorAll("[data-con-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this contractor?")) return; projPatch(pid, p => { p.contractors = (p.contractors || []).filter(c => c.id !== b.dataset.conDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-con-type]").forEach(sel => sel.onchange = () => {
     const id = sel.dataset.conType;
     if (sel.value === "__add__") {
@@ -5995,7 +6009,7 @@ function projPermitRowHtml(p, ptypes) {
         </label>
         <button type="button" class="ghost" data-perm-addatt="${esc(p.id)}" style="padding:6px 12px;">Upload PDF</button>
         <span style="flex:1;"></span>
-        <button class="iconbtn danger" data-perm-del="${esc(p.id)}" title="Delete permit">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-perm-del="${esc(p.id)}" title="Delete permit">Delete</button>
       </div>
       <input type="file" class="hidden" data-perm-attinput="${esc(p.id)}" accept="application/pdf,.pdf" multiple>
       <ul class="att-list" data-perm-attlist="${esc(p.id)}">${atts}</ul>
@@ -6057,6 +6071,7 @@ function projBindPermits(root, pid) {
   });
   projBindRegroup(root, pid, "data-perm-row", "permits", projSortPermits);
   root.querySelectorAll("[data-perm-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this permit?")) return; projPatch(pid, p => { p.permits = (p.permits || []).filter(x => x.id !== b.dataset.permDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-perm-status]").forEach(sel => sel.onchange = () => projPatchPermit(pid, sel.dataset.permStatus, p => p.status = sel.value));
   root.querySelectorAll("[data-perm-addatt]").forEach(b => b.onclick = () => { const t = root.querySelector(`[data-perm-attinput="${b.dataset.permAddatt}"]`); if (t) t.click(); });
   root.querySelectorAll("[data-perm-attinput]").forEach(inp => inp.onchange = e => projPermitAttUpload(pid, inp.dataset.permAttinput, e));
@@ -6104,7 +6119,7 @@ function projFinalRowHtml(r, ftypes) {
         </select>
         <input type="text" data-fin-desc="${esc(r.id)}" placeholder="Description" value="${esc(r.desc || "")}" style="flex:1; min-width:160px;">
         <button type="button" class="ghost" data-fin-addatt="${esc(r.id)}" style="padding:6px 12px;">Upload PDF</button>
-        <button class="iconbtn danger" data-fin-del="${esc(r.id)}" title="Delete record">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-fin-del="${esc(r.id)}" title="Delete record">Delete</button>
       </div>
       <input type="file" class="hidden" data-fin-attinput="${esc(r.id)}" accept="application/pdf,.pdf" multiple>
       <ul class="att-list" data-fin-attlist="${esc(r.id)}">${atts}</ul>
@@ -6167,6 +6182,7 @@ function projBindFinals(root, pid) {
   projBindRegroup(root, pid, "data-fin-row", "finalRecords", projSortFinals);
   root.querySelectorAll("[data-fin-desc]").forEach(inp => inp.onchange = () => projPatchFinal(pid, inp.dataset.finDesc, r => r.desc = inp.value));
   root.querySelectorAll("[data-fin-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this record?")) return; projPatch(pid, p => { p.finalRecords = (p.finalRecords || []).filter(x => x.id !== b.dataset.finDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-fin-addatt]").forEach(b => b.onclick = () => { const t = root.querySelector(`[data-fin-attinput="${b.dataset.finAddatt}"]`); if (t) t.click(); });
   root.querySelectorAll("[data-fin-attinput]").forEach(inp => inp.onchange = e => projFinalAttUpload(pid, inp.dataset.finAttinput, e));
   root.querySelectorAll("[data-fin-attrm]").forEach(b => b.onclick = () => { const [rid, idx] = b.dataset.finAttrm.split("|"); projPatchFinal(pid, rid, r => r.atts.splice(Number(idx), 1)); renderProjects(); });
@@ -6213,7 +6229,7 @@ function projScopeRowHtml(s, stypes) {
         </select>
         <span style="flex:1;"></span>
         <button type="button" class="ghost" data-sc-addatt="${esc(s.id)}" style="padding:6px 12px;">Upload PDF</button>
-        <button class="iconbtn danger" data-sc-del="${esc(s.id)}" title="Delete item">Delete</button>
+        <button class="iconbtn danger" data-perm="projects:delete" data-sc-del="${esc(s.id)}" title="Delete item">Delete</button>
       </div>
       <textarea data-sc-desc="${esc(s.id)}" rows="2" placeholder="Describe project details" style="width:100%; box-sizing:border-box;">${esc(s.desc || "")}</textarea>
       <input type="file" class="hidden" data-sc-attinput="${esc(s.id)}" accept="application/pdf,.pdf" multiple>
@@ -6277,6 +6293,7 @@ function projBindScope(root, pid) {
   projBindRegroup(root, pid, "data-sc-row", "scope", projSortScope);
   root.querySelectorAll("[data-sc-desc]").forEach(inp => inp.onchange = () => projPatchScope(pid, inp.dataset.scDesc, s => s.desc = inp.value));
   root.querySelectorAll("[data-sc-del]").forEach(b => b.onclick = () => { if (!confirm("Delete this scope item?")) return; projPatch(pid, p => { p.scope = (p.scope || []).filter(x => x.id !== b.dataset.scDel); }); renderProjects(); });
+  applyPerms(root);   // §4.1: delete is Company Administrator only
   root.querySelectorAll("[data-sc-addatt]").forEach(b => b.onclick = () => { const t = root.querySelector(`[data-sc-attinput="${b.dataset.scAddatt}"]`); if (t) t.click(); });
   root.querySelectorAll("[data-sc-attinput]").forEach(inp => inp.onchange = e => projScopeAttUpload(pid, inp.dataset.scAttinput, e));
   root.querySelectorAll("[data-sc-attrm]").forEach(b => b.onclick = () => { const [sid, idx] = b.dataset.scAttrm.split("|"); projPatchScope(pid, sid, s => s.atts.splice(Number(idx), 1)); renderProjects(); });
