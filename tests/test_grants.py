@@ -473,3 +473,16 @@ def test_the_sole_admin_is_still_left_administrable_after_the_refusal(client, co
     r = _invite(client, company["id"], company["token"], _addr("rescue"),
                 ["Company Administrator"], company["roles"])
     assert r.status_code == 200, r.text
+
+
+def test_demoting_the_sole_admin_to_a_manager_is_refused(client, company):
+    """Manager holds company:assign but §4.2 refuses Manager -> Company
+    Administrator, so the same stranding applies. Sibling of the two Vehicle
+    Manager cases; the role §11 does not name."""
+    mid = _membership_id(client, company["id"], company["token"],
+                         company["email"])
+    r = client.patch(
+        f"/companies/{company['id']}/members/{mid}",
+        headers=_auth(company["token"]),
+        json={"role_ids": [company["roles"]["Manager"]]})
+    assert r.status_code == 409, r.text
