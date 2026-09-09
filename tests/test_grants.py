@@ -275,6 +275,39 @@ def test_block_fires_at_acceptance_when_the_membership_changed(client, company):
     assert a.status_code == 409, a.text
 
 
+def test_acceptance_time_block_actually_revokes(client, company):
+    """The 409 says the invitation has been cancelled. Until 2026-09-09 it
+    had not been: the revoke ran inside the request's connection and the
+    pool rolled it back with the exception, so the token stayed pending and
+    every retry got the same 409 — the retry-forever case the re-check's own
+    comment says it exists to avoid (spec §11). A revoked token must now fail
+    as invalid, not as blocked."""
+    sam, _ = _add_member(client, company["id"], company["token"],
+                         company["roles"], ["Viewer"])
+    _, vm = _add_member(client, company["id"], company["token"],
+                        company["roles"], ["Vehicle Manager"])
+    inv = _invite(client, company["id"], vm, sam, ["Vehicle Maintenance"],
+                  company["roles"])
+    assert inv.status_code == 200, inv.text
+    mid = _membership_id(client, company["id"], company["token"], sam)
+    assert client.patch(
+        f"/companies/{company['id']}/members/{mid}",
+        headers=_auth(company["token"]),
+        json={"role_ids": [company["roles"]["Vehicle Inspector"]]}
+    ).status_code == 200
+
+    assert _accept(client, inv.json()["token"], password=PW).status_code == 409
+
+    listed = client.get(f"/companies/{company['id']}/invitations",
+                        headers=_auth(company["token"]))
+    assert listed.status_code == 200, listed.text
+    mine = [i for i in listed.json() if i["id"] == inv.json()["invitation_id"]]
+    assert mine and mine[0]["status"] == "revoked", mine
+
+    again = _accept(client, inv.json()["token"], password=PW)
+    assert again.status_code == 400, again.text
+
+
 def test_cross_domain_pair_is_allowed(client, company):
     """Vehicle Inspector + Property Maintenance is an ordinary pair."""
     sam, _ = _add_member(client, company["id"], company["token"],
@@ -300,6 +333,46 @@ def test_administrator_may_issue_the_combination(client, company):
                 ["Property Inspector", "Property Maintenance"],
                 company["roles"])
     assert r.status_code == 200, r.text
+
+
+def _accepted_role_names(client, company, email):
+    r = client.get(f"/companies/{company['id']}/members",
+                   headers=_auth(company["token"]))
+    assert r.status_code == 200, r.text
+    for m in r.json():
+        if m["email"] == email:
+            return {x["name"] for x in m["roles"]}
+    raise AssertionError(f"{email} is not a member")
+
+
+def test_administrator_issued_combination_survives_acceptance(client, company):
+    """The invite route exempts company:admin holders from the §2.3 block, but
+    until 2026-09-09 the acceptance-time re-check did not, so every
+    administrator-issued inspector + maintenance invitation returned 409 and
+    was revoked the moment it was accepted (spec §11). The two tests above
+    stop at the invite and would never have seen it."""
+    sam = _addr("both3")
+    r = _invite(client, company["id"], company["token"], sam,
+                ["Vehicle Inspector", "Vehicle Maintenance"], company["roles"])
+    assert r.status_code == 200, r.text
+    a = _accept(client, r.json()["token"])
+    assert a.status_code == 200, a.text
+    assert {"Vehicle Inspector", "Vehicle Maintenance"} <= \
+        _accepted_role_names(client, company, sam)
+
+
+def test_manager_issued_combination_survives_acceptance(client, company):
+    _, mgr = _add_member(client, company["id"], company["token"],
+                         company["roles"], ["Manager"])
+    sam = _addr("both4")
+    r = _invite(client, company["id"], mgr, sam,
+                ["Property Inspector", "Property Maintenance"],
+                company["roles"])
+    assert r.status_code == 200, r.text
+    a = _accept(client, r.json()["token"])
+    assert a.status_code == 200, a.text
+    assert {"Property Inspector", "Property Maintenance"} <= \
+        _accepted_role_names(client, company, sam)
 
 
 # --- §4.3 one email, many roles ---------------------------------------------

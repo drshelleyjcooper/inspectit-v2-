@@ -1,8 +1,8 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.4 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.5 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
-the full suite green (1,213 tests)
+the full suite green (1,216 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
 **Source of truth for the matrix:** this document. `User_Roles_Chart.pdf` is
 now historical — the decisions in §2 go beyond what the chart covers.
@@ -444,7 +444,10 @@ Four changes (item 3 turned out to need no work), all on the invitation path:
 1. **Enforce grants server-side.** A hidden dropdown option is not a control;
    reject a `role_ids` the caller may not issue.
 2. **Enforce the §2.3 block**, at create and again at acceptance, against
-   current members *and* pending invitations.
+   current members *and* pending invitations. *Corrected 2026-09-09:* the
+   acceptance re-check must carry the same company:admin exemption the
+   create path has, or §4.2's "Manager may issue the combination" is false
+   in practice — see §11.
 3. ~~**Merge on accept** (§4.3).~~ **Already works.** The accept route's
    `ON CONFLICT (company_id, user_id) DO UPDATE` reuses the membership and the
    role inserts are `ON CONFLICT DO NOTHING`, so a second invitation adds a
@@ -520,6 +523,10 @@ NULL` in the accept-route upsert.
 | 3. `permissions.py` + members router | applied 2026-09-03 | `30626de`, `26e1f73`, `4eb81a4`, `b2e6ee4` |
 | 4. Frontend | applied earlier | `inspectit-app.html`, +1,266 lines |
 | 5. Tests | applied earlier | `test_role_matrix.py` (246 lines), `test_grants.py` (44 tests) |
+
+*Corrected 2026-09-09 — see §11:* the table above is incomplete. `61a007a`
+(the first commit of 2026-09-03) carried step 2, step 4 and `permissions.py`
+together, and is the commit the `deleted_at = NULL` fix landed in.
 
 Step 3 landed as four edits: `permissions.py` wholesale,
 `BLOCKED_COMBINATIONS` into `presets.py`, eight sites in
@@ -710,6 +717,62 @@ had tested it. `test_presets.py` pins all four behaviours (drift is
 repaired, a clean run is a no-op, every mutable column refreshes, custom
 roles are left alone); the drift test was verified to fail against
 `DO NOTHING`. Commits `6cd280a` and `543ec0e`; suite now 1,213.
+
+**Retracted 2026-09-09 — §8's "applied earlier" and "already present".** The
+§8 table lists step 2 (migration 004 + `presets.py` v2.0) and step 4 (the
+frontend, +1,266 lines to `web/inspectit-app.html`) as "applied earlier" with
+no hash, and the step 3 row lists four commits. All of step 2, step 4,
+`permissions.py`, `test_role_matrix.py` and the `deleted_at = NULL` fix in the
+accept route landed in one commit, `61a007a`, at 09:35 on 2026-09-03 — the
+first commit of that day and the one the step 3 row omits. "Already present"
+for the `deleted_at = NULL` fix therefore means "present since that morning",
+not "present before the v2 work". `SESSION-2026-09-03.md` §1 already records
+the `git add -A` sweep; the table was never corrected to match. Also from the
+same sweep of §4, §5 and §8 against the code: §4.2's grants table, §4.3's
+merge-on-accept mechanics, §5's permission chain, and every hash and count in
+the §8 table check out.
+
+**Bug found and fixed 2026-09-09 — the acceptance re-check ignored the
+issuer.** §4.2 says Manager and Company Administrator may issue the inspector
++ maintenance combination, and `_assert_no_blocked_combo` exempts them at
+invite time. The acceptance-time re-check added in `b2e6ee4` (§7.4 item 2)
+had no such exemption, so every administrator-issued combination invitation
+was accepted by the invite route and then returned 409 and was revoked the
+moment the invitee accepted it. `test_manager_may_issue_the_combination` and
+`test_administrator_may_issue_the_combination` stop at the invite and could
+not see it; a live accept confirmed the 409. Fixed by
+`_issuer_holds_company_admin` in `api/routers/auth.py`: the re-check is
+skipped when the issuer currently holds company:admin in that company
+(checked at accept, so a demoted issuer loses the exemption with the role).
+The domain-manager path is unchanged and
+`test_block_fires_at_acceptance_when_the_membership_changed` still expects
+409. Two new tests accept the pair as administrator and as Manager and assert
+both roles land.
+
+Found while verifying that fix: **the 409's revoke never persisted.** The
+`UPDATE invitations SET status = 'revoked'` ran inside the request's pooled
+connection and the `HTTPException` rolled it back, so the token stayed
+`pending` and every retry got the same 409 — the retry-forever case the
+re-check's own comment says it exists to avoid. Present since `b2e6ee4`;
+nothing tested the status after the 409. Fixed by committing before the
+raise; `test_acceptance_time_block_actually_revokes` asserts the invitation
+lists as revoked and a second accept fails as invalid (400), not blocked.
+Suite now 1,216.
+
+**Open after the same sweep, decision needed (not changed):**
+- §4.1's grid shows `assign` only on vehicles, properties, projects and
+  company. `presets.py` grants `assign` on every tool module for Company
+  Administrator, Manager, Vehicle Manager and Property Manager, and has since
+  Phase 1; `test_role_matrix.py` matches the code, not the grid. Twenty-four
+  cells. Company Administrator's `company` cell also carries `create` in code
+  but not in the grid.
+- §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`
+  gates on `company:edit`. Same outcome for all thirteen presets; not for a
+  custom role holding edit without admin.
+- §5 says `/me` "must" return `can_grant_viewers` and each role's `grants`.
+  It never has. The frontend reads `m.can_grant_viewers` and falls back to
+  false, and takes grants from its own hardcoded preset table — the outcome
+  §5 says must not happen.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather
