@@ -704,7 +704,7 @@ may share a preset's name and is untouched by re-seeding — true, but nothing
 had tested it. `test_presets.py` pins all four behaviours (drift is
 repaired, a clean run is a no-op, every mutable column refreshes, custom
 roles are left alone); the drift test was verified to fail against
-`DO NOTHING`. Commit `6cd280a` and its follow-up; suite now 1,213.
+`DO NOTHING`. Commits `6cd280a` and `543ec0e`; suite now 1,213.
 
 **Vehicle/Property Manager sub-scoping.** BACKEND-SCHEMA §13 left open whether a
 regional property manager should be assignable to a subset of properties rather
