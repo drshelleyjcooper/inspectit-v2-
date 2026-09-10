@@ -2700,6 +2700,26 @@ const TOOLS = [
   { k: "maintenance", label: "Maintenance Scheduler" },
   { k: "warranty",    label: "Warranties / Records" },
 ];
+/* What opening each card tool needs (§4.1). The Inspection tile opens a NEW
+   inspection form, so it needs create; past inspections stay reachable for
+   viewers through the card's History link. The other three open lists whose
+   own write controls are gated inside. `side` is "vehicle" or "property". */
+const TOOL_PERM = {
+  inspection:  ["inspections", "create"],
+  repair:      ["repairs", "view"],
+  maintenance: ["maintenance", "view"],
+  warranty:    ["warranties", "view"],
+};
+function toolPerm(side, k) {
+  const t = TOOL_PERM[k];
+  return t ? (side + "_" + t[0] + ":" + t[1]) : null;
+}
+function canOpenTool(side, k) {
+  const spec = toolPerm(side, k);
+  if (!spec) return true;
+  const parts = spec.split(":");
+  return can(parts[0], parts[1]);
+}
 const typeMeta = v => TYPES.find(t => t.v === v) || { label: v || "—", cls: "auto" };
 
 const carSVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M3 13l2-5a2 2 0 011.9-1.3h10.2A2 2 0 0119 8l2 5v5h-3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 13v5h3" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="7.5" cy="17.5" r="1.8" stroke="currentColor" stroke-width="1.7"/><circle cx="16.5" cy="17.5" r="1.8" stroke="currentColor" stroke-width="1.7"/></svg>';
@@ -2813,7 +2833,7 @@ function toast(msg) {
 function vehCard(v) {
   const tm = typeMeta(v.type);
   const photo = v.photo ? `<img src="${v.photo}" alt="">` : `<span class="ph-ico">${carSVG}</span>`;
-  const tools = TOOLS.map(t => `<button class="tool-btn" data-veh-tool="${t.k}" data-veh-id="${v.id}">${toolIcons[t.k]}<span>${t.label}</span></button>`).join("");
+  const tools = TOOLS.map(t => `<button class="tool-btn" data-perm="${toolPerm("vehicle", t.k)}" data-veh-tool="${t.k}" data-veh-id="${v.id}">${toolIcons[t.k]}<span>${t.label}</span></button>`).join("");
   return `<div class="veh-card">
       <div class="veh-photo">${photo}</div>
       <div class="veh-body">
@@ -2940,6 +2960,7 @@ function vehDelete(id) {
 
 /* ----- tool sub-pages (Inspection / Repair Ticket / Maintenance) ----- */
 function vehOpenTool(id, key) {
+  if (!canOpenTool("vehicle", key)) { toast("Your role doesn't include this."); return; }
   vehView = { mode: "tool", editId: null, toolVehId: id, toolKey: key };
   if (key === "repair") repairView = { mode: "list", editId: null };
   if (key === "maintenance") vehSched.state.view = "view";
@@ -3743,7 +3764,7 @@ function propProjectsSummaryHtml(propertyId) {
 function propCard(p) {
   const tm = propTypeMeta(p.type);
   const photo = p.photo ? `<img src="${p.photo}" alt="">` : `<span class="ph-ico">${houseSVG}</span>`;
-  const tools = TOOLS.map(t => `<button class="tool-btn" data-prop-tool="${t.k}" data-prop-id="${p.id}">${toolIcons[t.k]}<span>${t.label}</span></button>`).join("");
+  const tools = TOOLS.map(t => `<button class="tool-btn" data-perm="${toolPerm("property", t.k)}" data-prop-tool="${t.k}" data-prop-id="${p.id}">${toolIcons[t.k]}<span>${t.label}</span></button>`).join("");
   return `<div class="veh-card">
       <div class="veh-photo">${photo}</div>
       <div class="veh-body">
@@ -3874,6 +3895,7 @@ function propDelete(id) {
 
 /* ----- tool sub-pages (Inspection / Repair Ticket / Maintenance) ----- */
 function propOpenTool(id, key) {
+  if (!canOpenTool("property", key)) { toast("Your role doesn't include this."); return; }
   propView = { mode: "tool", editId: null, toolPropId: id, toolKey: key };
   if (key === "repair") propRepairView = { mode: "list", editId: null };
   if (key === "maintenance") propSched.state.view = "view";

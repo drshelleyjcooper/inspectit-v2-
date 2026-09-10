@@ -851,7 +851,16 @@ Three changes in `web/inspectit-app.html`, none on the server:
   gating pass now runs after every redraw of the vehicles, properties and
   projects views, not only on navigation. The scheduler and warranty widgets
   take the module from their config. Project sub-record forms are not
-  individually gated; the guard covers them.
+  individually gated; the guard covers them. *Added the same day after
+  Brandon's re-test:* the vehicle and property cards' tool tiles were not
+  gated either, and the Inspection tile opens a new inspection form
+  directly, so a Vehicle Viewer could still start one (the save was
+  refused by the guard, but the form and its auto-print ran). Each tile now
+  carries the permission its tool needs (`TOOL_PERM`: Inspection needs
+  `create`, the three list tools need `view`) and `vehOpenTool` /
+  `propOpenTool` refuse a tool the role lacks, so a stale render can't open
+  it either. Past inspections stay reachable for viewers through the card's
+  History link.
 
 Verified in the served app signed in as the seeded Viewer: a direct write to
 a synced key leaves storage unchanged; the edit gates hide and the view/print
