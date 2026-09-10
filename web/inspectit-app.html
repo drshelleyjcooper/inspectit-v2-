@@ -1024,6 +1024,24 @@ function applyPerms(root) {
   });
 }
 
+/* A record form for a role without edit on its module becomes a read-only
+   view (§4.1, §2.4): fields disabled, the save / upload / remove controls
+   hidden, the print button left alone. Viewers open tickets and warranty
+   records to READ them; before 2026-09-09 the form was fully editable and
+   only the store guard stopped the save (spec §11). */
+function permReadOnlyForm(root, module, hideIds) {
+  if (can(module, "edit")) return false;
+  root.querySelectorAll("input, select, textarea").forEach(el => { el.disabled = true; });
+  (hideIds || []).forEach(id => {
+    const el = root.querySelector("#" + id);
+    if (el) el.classList.add("perm-hidden");
+  });
+  root.querySelectorAll(".arm, [data-att-rm], button[title=\"Remove\"]").forEach(el => el.classList.add("perm-hidden"));
+  const sub = root.querySelector(".page-head p");
+  if (sub && !/view only/.test(sub.textContent)) sub.textContent += " · view only";
+  return true;
+}
+
 function gateEl(el, allowed, mode) {
   if (allowed) {
     el.classList.remove("perm-hidden");
@@ -2700,17 +2718,18 @@ const TOOLS = [
   { k: "maintenance", label: "Maintenance Scheduler" },
   { k: "warranty",    label: "Warranties / Records" },
 ];
-/* What opening each card tool needs. Brandon's decision 2026-09-09: a card
-   tool is shown only to roles that can ACT in it, so the view-only roles
-   (Vehicle/Property Viewer, Viewer) get the card itself — details, History,
-   Report — and none of the four tools. Their §4.1 read access to those
-   modules still applies at the API and in the spend reports; it just isn't
-   surfaced as a screen. `side` is "vehicle" or "property". */
+/* What opening each card tool needs (§4.1, §2.4). The Inspection tile opens
+   a NEW inspection form, so it needs create; past inspections are read
+   through the card's History link. Repair Ticket, Maintenance Scheduler and
+   Warranties / Records open the card's records and need only view — the
+   view-only roles read them, and every write control inside (new, edit,
+   save, mark done, cost, delete) is gated separately. `side` is "vehicle"
+   or "property". */
 const TOOL_PERM = {
   inspection:  ["inspections", "create"],
-  repair:      ["repairs", "edit"],
-  maintenance: ["maintenance", "edit"],
-  warranty:    ["warranties", "edit"],
+  repair:      ["repairs", "view"],
+  maintenance: ["maintenance", "view"],
+  warranty:    ["warranties", "view"],
 };
 function toolPerm(side, k) {
   const t = TOOL_PERM[k];
@@ -3536,6 +3555,7 @@ function renderRepairForm(root, v, tm) {
     });
   };
 
+  permReadOnlyForm(root, "vehicle_repairs", ["saveTicket", "addAtt"]);
   $("saveTicket").onclick = () => {
     const date = $("rtDate").value;
     const desc = $("rtDesc").value.trim();
@@ -3651,7 +3671,7 @@ function repairSummaryHtml(id) {
       <button class="vr-id" data-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
       <span>${money(last.cost)}</span>
-      <button class="vr-all" data-perm="vehicle_repairs:edit" data-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
+      <button class="vr-all" data-perm="vehicle_repairs:view" data-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
 }
 
@@ -4171,7 +4191,7 @@ function propRepairSummaryHtml(id) {
       <button class="vr-id" data-prop-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
       <span>${money(last.cost)}</span>
-      <button class="vr-all" data-perm="property_repairs:edit" data-prop-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
+      <button class="vr-all" data-perm="property_repairs:view" data-prop-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
 }
 
@@ -4349,6 +4369,7 @@ function renderPropRepairForm(root, p, tm) {
     });
   };
 
+  permReadOnlyForm(root, "property_repairs", ["saveTicket", "addAtt"]);
   $("saveTicket").onclick = () => {
     const date = $("rtDate").value;
     const desc = $("rtDesc").value.trim();
@@ -5200,6 +5221,7 @@ function makeWarranties(cfg) {
       });
     };
 
+    permReadOnlyForm(root, cfg.module, ["saveWarr", "wAddAtt"]);
     root.querySelector("#saveWarr").onclick = () => {
       const item = root.querySelector("#wItem").value.trim();
       const err = root.querySelector("#wErr");

@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.11 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.12 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -858,16 +858,20 @@ Three changes in `web/inspectit-app.html`, none on the server:
   refused by the guard, but the form and its auto-print ran). Each tile now
   carries the permission its tool needs and `vehOpenTool` / `propOpenTool`
   refuse a tool the role lacks, so a stale render can't open it either.
-  *Decision, same day (Brandon):* a card tool is shown only to roles that
-  can **act** in it — Inspection needs `create`, Repair Ticket, Maintenance
-  Scheduler and Warranties / Records need `edit` — so the view-only roles
-  get the card itself (details, History, Report) and none of the four
-  tools; the repair-count link on the card follows the same rule. This
-  narrows what §2.4 promised on screen: domain viewers still hold `view` on
-  repairs and warranties at the API (the grid is unchanged, the spend
-  reports still read them) but no longer get those screens. If viewers
-  should lose the read access itself, that is a presets change to the §4.1
-  grid, not made here.
+  *Clarified the same day (Brandon, after a miscommunication that briefly
+  hid all four tools from viewers):* the viewer roles **do** read the
+  records behind each card — inspections via History, and the Repair
+  Ticket, Maintenance Scheduler and Warranties / Records tools — exactly as
+  §2.4 says. So those three tools need `view` and only Inspection needs
+  `create` (it starts a new record). What was actually wrong: a viewer who
+  opened a repair ticket or a warranty record got the full edit form —
+  every field live, Save and Upload present — and only the store guard
+  stopped the save. `permReadOnlyForm()` now turns those forms into a
+  read-only view for a role without `edit` (fields disabled, save / upload
+  / remove hidden, "view only" in the heading, print left alone), on both
+  ticket forms and the shared warranty form. The scheduler's controls were
+  already gated. Verified as Vehicle Viewer: the three list tools open,
+  the ticket form renders with every field disabled and no Save.
 
 Verified in the served app signed in as the seeded Viewer: a direct write to
 a synced key leaves storage unchanged; the edit gates hide and the view/print
