@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.10 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.11 · **Date:** 2026-09-09 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -856,11 +856,18 @@ Three changes in `web/inspectit-app.html`, none on the server:
   gated either, and the Inspection tile opens a new inspection form
   directly, so a Vehicle Viewer could still start one (the save was
   refused by the guard, but the form and its auto-print ran). Each tile now
-  carries the permission its tool needs (`TOOL_PERM`: Inspection needs
-  `create`, the three list tools need `view`) and `vehOpenTool` /
-  `propOpenTool` refuse a tool the role lacks, so a stale render can't open
-  it either. Past inspections stay reachable for viewers through the card's
-  History link.
+  carries the permission its tool needs and `vehOpenTool` / `propOpenTool`
+  refuse a tool the role lacks, so a stale render can't open it either.
+  *Decision, same day (Brandon):* a card tool is shown only to roles that
+  can **act** in it — Inspection needs `create`, Repair Ticket, Maintenance
+  Scheduler and Warranties / Records need `edit` — so the view-only roles
+  get the card itself (details, History, Report) and none of the four
+  tools; the repair-count link on the card follows the same rule. This
+  narrows what §2.4 promised on screen: domain viewers still hold `view` on
+  repairs and warranties at the API (the grid is unchanged, the spend
+  reports still read them) but no longer get those screens. If viewers
+  should lose the read access itself, that is a presets change to the §4.1
+  grid, not made here.
 
 Verified in the served app signed in as the seeded Viewer: a direct write to
 a synced key leaves storage unchanged; the edit gates hide and the view/print

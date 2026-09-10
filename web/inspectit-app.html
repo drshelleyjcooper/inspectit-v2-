@@ -2700,15 +2700,17 @@ const TOOLS = [
   { k: "maintenance", label: "Maintenance Scheduler" },
   { k: "warranty",    label: "Warranties / Records" },
 ];
-/* What opening each card tool needs (§4.1). The Inspection tile opens a NEW
-   inspection form, so it needs create; past inspections stay reachable for
-   viewers through the card's History link. The other three open lists whose
-   own write controls are gated inside. `side` is "vehicle" or "property". */
+/* What opening each card tool needs. Brandon's decision 2026-09-09: a card
+   tool is shown only to roles that can ACT in it, so the view-only roles
+   (Vehicle/Property Viewer, Viewer) get the card itself — details, History,
+   Report — and none of the four tools. Their §4.1 read access to those
+   modules still applies at the API and in the spend reports; it just isn't
+   surfaced as a screen. `side` is "vehicle" or "property". */
 const TOOL_PERM = {
   inspection:  ["inspections", "create"],
-  repair:      ["repairs", "view"],
-  maintenance: ["maintenance", "view"],
-  warranty:    ["warranties", "view"],
+  repair:      ["repairs", "edit"],
+  maintenance: ["maintenance", "edit"],
+  warranty:    ["warranties", "edit"],
 };
 function toolPerm(side, k) {
   const t = TOOL_PERM[k];
@@ -3649,7 +3651,7 @@ function repairSummaryHtml(id) {
       <button class="vr-id" data-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
       <span>${money(last.cost)}</span>
-      <button class="vr-all" data-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
+      <button class="vr-all" data-perm="vehicle_repairs:edit" data-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
 }
 
@@ -4169,7 +4171,7 @@ function propRepairSummaryHtml(id) {
       <button class="vr-id" data-prop-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
       <span>${money(last.cost)}</span>
-      <button class="vr-all" data-prop-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
+      <button class="vr-all" data-perm="property_repairs:edit" data-prop-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
 }
 
