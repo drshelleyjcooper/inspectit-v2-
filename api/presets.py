@@ -170,9 +170,12 @@ ROLE_PRESETS = [
         "viewer_grants": [],
     },
     {
+        # Reads projects too, mirroring Property Manager's domain: a project
+        # belongs to a property (decided 2026-09-11).
         "name": PROP_VIEW,
         "scope": "company",
-        "permissions": {m: list(_VIEW_PRINT) for m in _PROPERTY_MODULES},
+        "permissions": {**{m: list(_VIEW_PRINT) for m in _PROPERTY_MODULES},
+                        "projects": list(_VIEW_PRINT)},
         "grants": [],
         "viewer_grants": [],
     },
@@ -197,7 +200,7 @@ ROLE_PRESETS = [
 
 # Bump on any change above. Inert: nothing logs or asserts it and the seeder
 # re-seeds unconditionally every boot (spec §11) — kept as a change marker.
-PRESET_VERSION = 3
+PRESET_VERSION = 4
 
 
 def seed_role_presets(conn) -> int:

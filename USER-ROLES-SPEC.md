@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.12 · **Date:** 2026-09-09 · **Status:** specified, settled,
+**Version:** 2.14 · **Date:** 2026-09-11 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -119,7 +119,9 @@ domain. "Manager level only" governs create and edit.
 ### 2.5 New: domain viewers, and who may grant them
 
 Vehicle Viewer, Property Viewer and Project Viewer are read-and-print inside
-one domain. The company-wide Viewer is unchanged and remains **Company
+one domain. Property Viewer's domain includes projects, as Property Manager's
+does: a project belongs to a property (decided 2026-09-11; the row was `—`
+before). The company-wide Viewer is unchanged and remains **Company
 Administrator only** — a domain manager who could issue it would be granting
 read access across every domain through the back door.
 
@@ -260,7 +262,7 @@ can't express "vehicle roles only," and the domain rule is now the whole point.
 | **Vehicle Maintenance** | v | — | vcep | — | — | — | — | — | — | — | — | — | company |
 | **Property Maintenance** | — | — | — | — | — | v | — | vcep | — | — | — | — | company |
 | **Vehicle Viewer** | vp | vp | vp | vp | vp | — | — | — | — | — | — | — | company |
-| **Property Viewer** | — | — | — | — | — | vp | vp | vp | vp | vp | — | — | company |
+| **Property Viewer** | — | — | — | — | — | vp | vp | vp | vp | vp | vp | — | company |
 | **Project Viewer** | — | — | — | — | — | v | — | — | — | — | vp | — | company |
 | **Viewer** | vp | vp | vp | vp | vp | vp | vp | vp | vp | vp | vp | — | company |
 
@@ -851,7 +853,9 @@ Three changes in `web/inspectit-app.html`, none on the server:
   gating pass now runs after every redraw of the vehicles, properties and
   projects views, not only on navigation. The scheduler and warranty widgets
   take the module from their config. Project sub-record forms are not
-  individually gated; the guard covers them. *Added the same day after
+  individually gated; the guard covers them. *Closed 2026-09-11:* the
+  dossier is now rendered read-only for a role without `projects:edit` —
+  see the entry below. *Added the same day after
   Brandon's re-test:* the vehicle and property cards' tool tiles were not
   gated either, and the Inspection tile opens a new inspection form
   directly, so a Vehicle Viewer could still start one (the save was
@@ -877,6 +881,49 @@ Verified in the served app signed in as the seeded Viewer: a direct write to
 a synced key leaves storage unchanged; the edit gates hide and the view/print
 ones don't; as Company Administrator the same write lands. Suite unchanged
 at 1,223 (no server change).
+
+**2026-09-11 — Property Viewer reads projects; the project dossier goes
+read-only.** Two changes from Brandon's viewer pass:
+
+- **Property Viewer gains `projects: vp`.** The §4.1 row had `—`: a Property
+  Viewer could read a property but not the projects on it, although Property
+  Manager's domain has included projects since 2026-08-29. Changed in
+  `api/presets.py` (`PRESET_VERSION` 4, re-seeded on boot as §11 records),
+  the app's `ROLE_PRESETS` fallback and blurb, `test_role_matrix.py`, and
+  the grid above. Print comes with view, as for every viewer cell. The
+  Projects tab now resolves for the role through `TAB_MODULES` unchanged.
+  *Caught on the first re-test:* the seeder runs at boot only, and the
+  local dev API had been up since before the edit, so its `roles` row still
+  said `—` and the viewer stayed locked out until the presets were
+  re-seeded into the running database by hand (`seed_role_presets` over
+  the embedded server's socket). A deploy or restart does the same on its
+  own; a preset edit against a live dev server does not.
+- **Project Viewer (and any role without `projects:edit`) could still edit a
+  project on screen.** Opening a project gave the full dossier — overview
+  fields live with Save, every section's add / upload / remove controls
+  present — and only the store guard refused the write, the same shape as
+  the ticket and warranty bug above. `projApplyReadOnly()` now runs from
+  `renderProjects()` after every dossier redraw: `permReadOnlyForm()`
+  disables the fields and hides the overview Save, the section add /
+  upload / attachment-remove buttons are hidden by attribute name (they
+  carry no `data-perm`), the delete buttons were already gated on
+  `projects:delete`, and the heading reads "Project" with a view-only
+  subtitle. Print / Save as PDF and attachment downloads stay. No server
+  change for this part.
+
+**2026-09-11 — the Maintenance Scheduler goes read-only for viewers.**
+Brandon's pass as Vehicle Viewer and Viewer: the scheduler's write buttons
+were gated (Edit schedule, Save schedule, Mark done, + Cost, Clear, the
+last-done dates, the odometer field), but the schedule picker, Delete
+schedule, the per-item odometer-at-service fields and the "use latest
+inspection" odometer reset carried no gate, so a viewer could still switch
+which schedule an entity follows, delete a saved one, and change what was
+recorded — with the store guard as the only backstop. `makeScheduler`'s
+render now finishes with `permReadOnlyForm()` for a role without `edit` on
+the tool's module: every field disabled, those controls hidden, "view only"
+in the heading. Covers both schedulers, so Property Viewer and Viewer get
+the same on the property side. History toggles and the card summary stay.
+No server change.
 
 **Open after the same sweep, decision needed (not changed):**
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`

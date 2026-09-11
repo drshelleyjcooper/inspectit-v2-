@@ -799,8 +799,8 @@ const ROLE_PRESETS = {
   property_viewer: {
     id: "property_viewer", name: "Property Viewer", rank: 10, scope: "company",
     grants: [], viewerGrants: [],
-    blurb: "Reads and prints everything on the property side. Changes nothing.",
-    permissions: permBlob(PROPERTY_MODULES, READ)
+    blurb: "Reads and prints everything on the property side, projects included. Changes nothing.",
+    permissions: permBlob(PROPERTY_MODULES.concat(["projects"]), READ)
   },
   project_viewer: {
     id: "project_viewer", name: "Project Viewer", rank: 10, scope: "company",
@@ -4766,7 +4766,9 @@ function makeScheduler(cfg) {
         ${(!editing && saved[S.selected]) ? `<button type="button" class="iconbtn danger" id="pmDelete">Delete schedule</button>` : ""}
       </div>
       ${editing ? `<p class="hint">Rename items &amp; categories, change each item's frequency, and add or remove items &amp; categories. Then <b>Done editing</b> and <b>Save schedule…</b> to keep it as a reusable template.</p>`
-                : `<p class="hint">Set each item's <b>Last done</b> date (or tap <b>Mark done</b> for today). Due dates and status are calculated from the frequency.</p>`}
+                : can(cfg.module, "edit")
+                  ? `<p class="hint">Set each item's <b>Last done</b> date (or tap <b>Mark done</b> for today). Due dates and status are calculated from the frequency.</p>`
+                  : `<p class="hint">Due dates and status are calculated from each item's last-done date and frequency. Your role can read this schedule but not change it.</p>`}
       ${editing ? "" : AD.toolbarExtra(entity, ctx)}
       <div id="pmBody">${body}</div>`;
 
@@ -4782,6 +4784,13 @@ function makeScheduler(cfg) {
     root.querySelector("#pmSave").onclick = saveTemplate;
     const del = root.querySelector("#pmDelete"); if (del) del.onclick = deleteTemplate;
     applyPerms(root);   // gates edit/mark-done/cost/clear/✕ for view-only roles (§4.1)
+    /* The data-perm gates cover the write buttons, but the schedule picker,
+       Delete schedule, the odometer-at-service fields and the odometer reset
+       link carried none, so a viewer could still change which schedule a
+       vehicle follows and what was recorded. Read-only pass for a role
+       without edit (2026-09-11): every field disabled, those controls hidden,
+       "view only" in the heading. History toggles stay. */
+    permReadOnlyForm(root, cfg.module, ["pmDelete", "pmOdoReset"]);
 
     const api = { set: (k, val) => { setItem(id, k, val); rerender(); }, get: k => stateMap[k], today: pmISO(new Date()), ctx,
       /* append a completed-service cost to this entity's spend history (cfg.spendKey);
@@ -5347,6 +5356,25 @@ function renderProjects() {
   if (projView.mode === "form") renderProjForm(root);
   else renderProjList(root);
   applyPerms(root);
+  if (projView.mode === "form" && projView.editId) projApplyReadOnly(root);
+}
+
+/* The project dossier for a role without projects:edit (Project Viewer,
+   Property Viewer, Viewer) is a read-only view. permReadOnlyForm() disables
+   every field and hides the overview Save; the section add / upload / remove
+   controls carry no data-perm, so they are hidden here by attribute name
+   (data-*-add, data-*-addatt, data-*-attrm, data-att-rm). Delete buttons
+   already carry projects:delete. Runs after every redraw, since each section
+   redraws the whole dossier through renderProjects(). */
+function projApplyReadOnly(root) {
+  if (!permReadOnlyForm(root, "projects", ["pjSave"])) return;
+  root.querySelectorAll("button").forEach(b => {
+    for (const a of b.attributes) {
+      if (/^data-[a-z]+-(add|addatt|attrm)$/.test(a.name) || a.name === "data-att-rm") {
+        b.classList.add("perm-hidden"); return;
+      }
+    }
+  });
 }
 
 /* ----- list ----- */
@@ -5492,22 +5520,37 @@ function projCreate() {
   renderProjects();
 }
 
+/* Load a project with its sub-records brought up to the current shape. The
+   normalised copy is persisted only when the role may edit projects: for a
+   viewer the store guard would refuse the write, and its recovery redraw
+   sent the viewer straight back to the list (2026-09-11). Either way the
+   returned record is the migrated one, so the dossier renders the same. */
+function projLoadMigrated(pid) {
+  const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return null;
+  let changed = false;
+  changed = projMigrateEstimates(pr) || changed;
+  changed = projMigrateScope(pr) || changed;
+  changed = projMigratePermits(pr) || changed;
+  changed = projMigrateFinals(pr) || changed;
+  if (changed && can("projects", "edit")) setProjects(list);
+  return pr;
+}
+
 /* ----- existing project: full detail editor ----- */
 function renderProjDetail(root) {
-  projMigrateEstimates(projView.editId);
-  projMigrateScope(projView.editId);
-  projMigratePermits(projView.editId);
-  projMigrateFinals(projView.editId);
-  const pr = getProjects().find(x => x.id === projView.editId);
+  const pr = projLoadMigrated(projView.editId);
   if (!pr) return projReset();
   const props = getProperties();
   const types = projGetTypes();
   if (pr.type && !types.includes(pr.type)) types.push(pr.type);
-  setTopTitle("Edit Project");
+  const editable = can("projects", "edit");
+  setTopTitle(editable ? "Edit Project" : "Project");
   root.innerHTML = `
     <button class="back-link" id="projBack">${backSVG} Back to projects</button>
     <div class="section-head">
-      <div class="page-head"><h1>${esc(pr.name || "Untitled project")}</h1><p>Overview saves when you click Save. All other sections save automatically.</p></div>
+      <div class="page-head"><h1>${esc(pr.name || "Untitled project")}</h1><p>${editable
+        ? "Overview saves when you click Save. All other sections save automatically."
+        : "This project is view only for your role."}</p></div>
       <button class="ghost" id="projPrintBtn">Print / Save as PDF</button>
     </div>
     <div class="card">
@@ -5683,8 +5726,7 @@ function projSortEstimates(list) {
   return grouped;
 }
 /* one-time normalize: move legacy {label} → {category}, then persist the grouped order into storage */
-function projMigrateEstimates(pid) {
-  const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
+function projMigrateEstimates(pr) {
   let changed = false;
   (pr.estimates || []).forEach(e => {
     if (e.category == null) { e.category = e.label || ""; changed = true; }
@@ -5693,7 +5735,7 @@ function projMigrateEstimates(pid) {
   const cur = pr.estimates || [];
   const sorted = projSortEstimates(cur);
   if (sorted.length !== cur.length || sorted.some((e, i) => e !== cur[i])) { pr.estimates = sorted; changed = true; }
-  if (changed) setProjects(list);
+  return changed;
 }
 const projCostBreakdownRow = (label, amount) => `<div style="display:flex; justify-content:space-between; gap:16px;"><span style="color:var(--muted);">${esc(label)}</span><span style="font-weight:600;">${projFmtMoney(amount)}</span></div>`;
 /* per-category subtotals, in display (grouped) order */
@@ -6106,8 +6148,7 @@ function projSortPermits(list) {
   return grouped;
 }
 /* one-time normalize: legacy {label} → {ptype}, then persist grouped order */
-function projMigratePermits(pid) {
-  const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
+function projMigratePermits(pr) {
   let changed = false;
   (pr.permits || []).forEach(p => {
     if (p.ptype == null) { p.ptype = p.label || ""; changed = true; }
@@ -6116,7 +6157,7 @@ function projMigratePermits(pid) {
   const cur = pr.permits || [];
   const sorted = projSortPermits(cur);
   if (sorted.length !== cur.length || sorted.some((p, i) => p !== cur[i])) { pr.permits = sorted; changed = true; }
-  if (changed) setProjects(list);
+  return changed;
 }
 function projPatchPermit(pid, permitId, fn) {
   const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
@@ -6219,8 +6260,7 @@ function projSortFinals(list) {
   grouped.push(...list.filter(r => !projFrtypeOf(r)));
   return grouped;
 }
-function projMigrateFinals(pid) {
-  const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
+function projMigrateFinals(pr) {
   let changed = false;
   (pr.finalRecords || []).forEach(r => {
     if (r.rtype == null) { r.rtype = r.label || ""; changed = true; }
@@ -6229,7 +6269,7 @@ function projMigrateFinals(pid) {
   const cur = pr.finalRecords || [];
   const sorted = projSortFinals(cur);
   if (sorted.length !== cur.length || sorted.some((r, i) => r !== cur[i])) { pr.finalRecords = sorted; changed = true; }
-  if (changed) setProjects(list);
+  return changed;
 }
 function projPatchFinal(pid, recId, fn) {
   const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
@@ -6329,8 +6369,7 @@ function projSortScope(list) {
   grouped.push(...list.filter(s => !projStypeOf(s)));
   return grouped;
 }
-function projMigrateScope(pid) {
-  const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;
+function projMigrateScope(pr) {
   let changed = false;
   (pr.scope || []).forEach(s => {
     if (s.stype == null) { s.stype = s.label || ""; changed = true; }
@@ -6339,7 +6378,7 @@ function projMigrateScope(pid) {
   const cur = pr.scope || [];
   const sorted = projSortScope(cur);
   if (sorted.length !== cur.length || sorted.some((s, i) => s !== cur[i])) { pr.scope = sorted; changed = true; }
-  if (changed) setProjects(list);
+  return changed;
 }
 function projPatchScope(pid, scopeId, fn) {
   const list = getProjects(); const pr = list.find(x => x.id === pid); if (!pr) return;

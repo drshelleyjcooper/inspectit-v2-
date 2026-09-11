@@ -96,7 +96,8 @@ EXPECTED = {
     },
     "Property Viewer": {
         "scope": "company",
-        "perms": {"properties": READ, **_spread(PROP_TOOLS, READ)},
+        "perms": {"properties": READ, **_spread(PROP_TOOLS, READ),
+                  "projects": READ},
     },
     "Project Viewer": {
         "scope": "company",
