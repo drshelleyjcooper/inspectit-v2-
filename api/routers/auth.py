@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, security
 from ..db import audit, cleanup_user_tokens, get_pool
+from ..presets import BLOCKED_COMBINATIONS
 from ..ratelimit import rate_limit_auth
 
 # Every /auth route is rate-limited per client IP (F3): these are the only
@@ -175,6 +176,64 @@ def reset(body: ResetIn):
     return {"ok": True}
 
 
+def _issuer_holds_company_admin(conn, company_id, user_id) -> bool:
+    """Does the invitation's issuer hold company:admin in this company now?
+
+    The §2.3 block exists to stop a DOMAIN manager assembling inspector +
+    maintenance; Company Administrator and Manager may issue the pair
+    deliberately (§4.2) and the invite route exempts them. The acceptance
+    re-check must honour the same exemption or every such invitation dies at
+    accept — which it did until 2026-09-09 (spec §11). Checked against the
+    issuer's CURRENT roles: if they were demoted between issue and accept the
+    exemption goes with them."""
+    row = conn.execute(
+        """SELECT 1 FROM memberships m
+           JOIN membership_roles mr ON mr.membership_id = m.id
+           JOIN roles r ON r.id = mr.role_id AND r.deleted_at IS NULL
+           WHERE m.company_id = %s AND m.user_id = %s
+             AND m.status = 'active' AND m.deleted_at IS NULL
+             AND r.permissions->'company' ? 'admin'
+           LIMIT 1""",
+        (company_id, user_id),
+    ).fetchone()
+    return row is not None
+
+
+def _reject_blocked_combination(conn, inv, user):
+    """Acceptance-time §2.3 re-check. Raises 409 and revokes on a hit."""
+    # Re-check the blocked combination here, not just at invite time: the
+    # membership set can change between issue and accept, and acceptance is
+    # the moment the roles actually land (§2.3). Revoke rather than leave
+    # it pending — a token that can never be accepted is worse than no
+    # token, because the invitee would retry forever.
+    held = conn.execute(
+        """SELECT r.name FROM memberships m
+           JOIN membership_roles mr ON mr.membership_id = m.id
+           JOIN roles r ON r.id = mr.role_id AND r.deleted_at IS NULL
+           WHERE m.company_id = %s AND m.user_id = %s
+             AND m.deleted_at IS NULL""",
+        (inv["company_id"], user["id"]),
+    ).fetchall()
+    incoming = conn.execute(
+        "SELECT name FROM roles WHERE id = ANY(%s::uuid[])",
+        (list(inv["role_ids"]),),
+    ).fetchall()
+    resulting = {r["name"] for r in held} | {r["name"] for r in incoming}
+    for pair in BLOCKED_COMBINATIONS:
+        if pair <= resulting:
+            conn.execute(
+                "UPDATE invitations SET status = 'revoked' WHERE id = %s",
+                (inv["id"],))
+            # Commit before raising: the pool rolls back on an exception, and
+            # until 2026-09-09 that silently undid this revoke — the token
+            # stayed pending and every retry got the same 409 (spec §11).
+            conn.commit()
+            raise HTTPException(
+                409, "Holding " + " and ".join(sorted(pair)) + " together "
+                     "needs administrator approval. This invitation has "
+                     "been cancelled — ask an administrator.")
+
+
 @router.post("/invitations/accept")
 def accept_invitation(body: AcceptInviteIn):
     """Join a company from an invite token. New users must supply name+password;
@@ -207,9 +266,13 @@ def accept_invitation(body: AcceptInviteIn):
                  body.name.strip()),
             ).fetchone()
 
+        if not _issuer_holds_company_admin(conn, inv["company_id"],
+                                           inv["invited_by"]):
+            _reject_blocked_combination(conn, inv, user)
+
         membership = conn.execute(
             """INSERT INTO memberships (company_id, user_id) VALUES (%s, %s)
-               ON CONFLICT (company_id, user_id) DO UPDATE SET status = 'active'
+               ON CONFLICT (company_id, user_id) DO UPDATE SET status = 'active',deleted_at = NULL
                RETURNING id""",
             (inv["company_id"], user["id"]),
         ).fetchone()
@@ -222,5 +285,5 @@ def accept_invitation(body: AcceptInviteIn):
                      (inv["id"],))
         audit(conn, inv["company_id"], user["id"], "create", "membership",
               membership["id"], {"event": "invitation_accepted"})
-        return {"company_id": str(inv["company_id"]), "user_id": str(user["id"]),
+        return {"company_id": str(inv["company_id"]), "user_id": str(user["id"]), "email": inv["email"],
                 **_token_pair(conn, user["id"])}
