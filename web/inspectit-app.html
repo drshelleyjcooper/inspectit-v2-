@@ -409,12 +409,17 @@
     position: fixed; inset: 0; background: rgba(15,23,42,.42);
     display: grid; place-items: center; padding: 20px; z-index: 50;
   }
-  .modal { width: 100%; max-width: 460px; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.25); overflow: hidden; }
+  /* Capped to the viewport (the overlay pads 20px each side) so a long list — the
+     Users & roles member list, for one — scrolls inside the body instead of pushing
+     the header and footer off screen. */
+  .modal { width: 100%; max-width: 460px; max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px);
+    display: flex; flex-direction: column; background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,.25); overflow: hidden; }
+  .modal header, .modal .foot { flex: none; }
   .modal header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; align-items: center; }
   .modal header h3 { margin: 0; font-size: 1.1rem; }
   .modal header .x { margin-left: auto; border: none; background: none; cursor: pointer; color: var(--muted); font-size: 1.3rem; line-height: 1; padding: 4px; }
   .modal header .x:hover { color: var(--ink); }
-  .modal .body { padding: 22px; }
+  .modal .body { padding: 22px; flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .modal .body label.field { margin-bottom: 14px; }
   .modal .foot { padding: 16px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; background: #fafbfc; }
 
