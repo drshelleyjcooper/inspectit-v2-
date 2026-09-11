@@ -5,6 +5,8 @@ threadpool where sync endpoints run.
 """
 import contextvars
 
+from .clientip import client_ip_from_headers
+
 request_meta = contextvars.ContextVar("request_meta", default=None)
 
 
@@ -17,14 +19,8 @@ class RequestMetaMiddleware:
             await self.app(scope, receive, send)
             return
         headers = dict(scope.get("headers") or [])
-        fwd = headers.get(b"x-forwarded-for", b"").decode("latin-1")
-        if fwd:
-            # Last entry = appended by our own proxy; earlier ones are
-            # client-supplied (same rule as ratelimit.client_ip).
-            ip = fwd.split(",")[-1].strip()
-        else:
-            client = scope.get("client")
-            ip = client[0] if client else None
+        client = scope.get("client")
+        ip = client_ip_from_headers(headers, client[0] if client else None)
         ua = headers.get(b"user-agent", b"").decode("latin-1")[:300] or None
         token = request_meta.set({"ip": ip, "user_agent": ua})
         try:

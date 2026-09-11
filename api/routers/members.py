@@ -58,7 +58,6 @@ def list_members(limit: int = Query(200, ge=1, le=500),
     return [{**r, "membership_id": str(r["membership_id"]),
              "user_id": str(r["user_id"])} for r in rows]
 
-
 class InviteIn(BaseModel):
     email: str
     role_ids: List[str]

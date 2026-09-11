@@ -16,13 +16,26 @@ from . import config
 
 # ---------- passwords ----------
 
+# bcrypt only looks at the first 72 bytes. bcrypt < 5 truncated silently;
+# bcrypt >= 5 (what requirements.txt installs) raises ValueError instead,
+# which turned a long password into a 500 on signup and a 401 on login.
+# Truncate explicitly so behaviour is stable across bcrypt versions.
+_BCRYPT_MAX = 72
+
+
+def _pw_bytes(password: str) -> bytes:
+    return password.encode("utf-8")[:_BCRYPT_MAX]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(_pw_bytes(password), bcrypt.gensalt()).decode()
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    if not password_hash:
+        return False
     try:
-        return bcrypt.checkpw(password.encode(), password_hash.encode())
+        return bcrypt.checkpw(_pw_bytes(password), password_hash.encode())
     except ValueError:
         return False
 

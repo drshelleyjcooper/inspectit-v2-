@@ -9,6 +9,8 @@ import json
 import logging
 import time
 
+from .clientip import client_ip_from_headers
+
 logger = logging.getLogger("inspectit.access")
 
 
@@ -32,10 +34,8 @@ class AccessLogMiddleware:
             await self.app(scope, receive, send_wrapped)
         finally:
             headers = dict(scope.get("headers") or [])
-            fwd = headers.get(b"x-forwarded-for", b"").decode("latin-1")
             client = scope.get("client")
-            ip = (fwd.split(",")[-1].strip() if fwd
-                  else (client[0] if client else None))
+            ip = client_ip_from_headers(headers, client[0] if client else None)
             logger.info(json.dumps({
                 "method": scope.get("method"),
                 "path": scope.get("path"),

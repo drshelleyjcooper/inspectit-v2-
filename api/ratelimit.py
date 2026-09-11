@@ -5,12 +5,16 @@ the deployment shape for the foreseeable future. If the app ever scales to
 multiple instances, each instance enforces the limit independently (still a
 meaningful brake on brute force); a shared store can replace this then.
 """
+import logging
 import time
 from collections import deque
 
 from fastapi import HTTPException, Request
 
 from . import config
+from .clientip import client_ip_from_request
+
+log = logging.getLogger("inspectit")
 
 
 class RateLimiter:
@@ -30,6 +34,8 @@ class RateLimiter:
             q.popleft()
         if len(q) >= self.max_requests:
             retry = max(1, int(q[0] + self.window_s - now) + 1)
+            log.warning("auth rate limit hit for %s (%d/%ds)", key,
+                        self.max_requests, self.window_s)
             raise HTTPException(
                 429, "Too many attempts — please wait a moment and try again.",
                 headers={"Retry-After": str(retry)})
@@ -49,13 +55,10 @@ auth_limiter = RateLimiter(config.AUTH_RATE_LIMIT, config.AUTH_RATE_WINDOW_S)
 
 
 def client_ip(request: Request) -> str:
-    """Real client IP. Behind one trusted proxy (DO App Platform), the LAST
-    X-Forwarded-For entry is the address the proxy itself observed; earlier
-    entries are client-supplied and spoofable — never trust them."""
-    fwd = request.headers.get("x-forwarded-for", "")
-    if fwd:
-        return fwd.split(",")[-1].strip()
-    return request.client.host if request.client else "unknown"
+    """Real client IP. On DO App Platform this is the do-connecting-ip
+    header (X-Forwarded-For there holds the *ingress* IP, which is the same
+    for every visitor). See api/clientip.py for the full resolution order."""
+    return client_ip_from_request(request)
 
 
 def rate_limit_auth(request: Request):

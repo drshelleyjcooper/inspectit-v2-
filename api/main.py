@@ -5,7 +5,7 @@ fresh database (local pgserver or DO Managed Postgres) self-initializes.
 """
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,11 +17,12 @@ from .accesslog import AccessLogMiddleware
 from .bodylimit import BodySizeLimitMiddleware
 from .db import cleanup_expired, get_pool, run_migrations
 from .presets import seed_role_presets
+from .ratelimit import client_ip
 from .requestmeta import RequestMetaMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from .routers import (assignments, auth, collections, entities, importer, me,
-                      members)
+from .routers import (admin, assignments, auth, collections, entities,
+                      importer, me, members)
 
 
 log = logging.getLogger("inspectit")
@@ -34,6 +35,9 @@ async def lifespan(app: FastAPI):
         with get_pool().connection() as conn:
             seed_role_presets(conn)
             cleanup_expired(conn)
+            promoted = admin.promote_platform_admins(conn)
+            if promoted:
+                log.info("Platform admins: %s", ", ".join(promoted))
         log.info("Database ready")
     except Exception as exc:
         log.error("Startup DB init failed (app will serve, DB routes will error): %s", exc)
@@ -69,11 +73,15 @@ app.include_router(entities.router)
 app.include_router(assignments.router)
 app.include_router(importer.router)
 app.include_router(collections.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")
-def health():
-    result = {"ok": True}
+def health(request: Request):
+    # client_ip is the key the auth rate limiter uses for this caller. If
+    # every visitor sees the same value here, the proxy headers are not
+    # being resolved correctly and logins will collapse into one bucket.
+    result = {"ok": True, "client_ip": client_ip(request)}
     if config._PRODUCTION_PROBLEMS:
         result["config"] = config._PRODUCTION_PROBLEMS
     try:
@@ -103,6 +111,12 @@ def landing():
 @app.get("/web/inspectit-app.html")
 def app_shell():
     return FileResponse(config.PROJECT_ROOT / "web" / "inspectit-app.html",
+                        media_type="text/html", headers=_NO_CACHE)
+
+
+@app.get("/web/admin.html")
+def admin_shell():
+    return FileResponse(config.PROJECT_ROOT / "web" / "admin.html",
                         media_type="text/html", headers=_NO_CACHE)
 
 

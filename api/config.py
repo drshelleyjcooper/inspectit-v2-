@@ -5,6 +5,7 @@ automatically and files go to ./.filestore. In production on DigitalOcean App
 Platform, set DATABASE_URL (Managed Postgres), JWT_SECRET, and the SPACES_*
 variables.
 """
+import logging
 import os
 import secrets
 from pathlib import Path
@@ -56,8 +57,14 @@ try:
                             DEV_MODE, ALLOWED_ORIGINS)
 except RuntimeError as exc:
     _PRODUCTION_PROBLEMS = str(exc)
-    import logging
     logging.getLogger("inspectit").error("CONFIG: %s", exc)
+    # Previously this was logged and swallowed, so a production deploy missing
+    # JWT_SECRET would boot anyway and fall through to the dev-only file
+    # fallback below. On App Platform that file is ephemeral, so every deploy
+    # silently rotated the signing key and 401'd every existing session.
+    # Fail the deploy instead — a broken deploy is visible, a rotating key is not.
+    if IS_PRODUCTION:
+        raise
 
 
 def _jwt_secret() -> str:
@@ -65,7 +72,15 @@ def _jwt_secret() -> str:
     if env:
         return env
     # Dev-only fallback: generate once and persist beside the repo so tokens
-    # survive restarts. Production is gated above and never reaches this.
+    # survive restarts. Guarded twice on purpose — the check above should
+    # already have stopped a production boot, but this fallback must never
+    # be reachable in production even if that guard is changed or bypassed.
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            "JWT_SECRET must be set in production. The on-disk fallback is "
+            "dev-only: on App Platform the container filesystem is ephemeral, "
+            "so every deploy would issue a new signing key and invalidate all "
+            "existing sessions.")
     f = PROJECT_ROOT / ".jwt_secret"
     if not f.exists():
         f.write_text(secrets.token_hex(32))
@@ -89,6 +104,14 @@ ACCESS_TOKEN_TTL_MIN = int(os.environ.get("ACCESS_TOKEN_TTL_MIN", "30"))
 REFRESH_TOKEN_TTL_DAYS = int(os.environ.get("REFRESH_TOKEN_TTL_DAYS", "30"))
 RESET_TOKEN_TTL_MIN = int(os.environ.get("RESET_TOKEN_TTL_MIN", "60"))
 INVITE_TTL_DAYS = int(os.environ.get("INVITE_TTL_DAYS", "14"))
+
+# Comma-separated emails that are promoted to platform admin at every startup
+# (idempotent). This is how the first admin is bootstrapped in production —
+# set it in the App Platform env vars, redeploy, and that account can open
+# /web/admin.html. Accounts must already exist (sign up in the app first).
+PLATFORM_ADMIN_EMAILS = [e.strip().lower() for e in
+                         os.environ.get("PLATFORM_ADMIN_EMAILS", "").split(",")
+                         if e.strip()]
 
 # 'local' (dev: files under ./.filestore) or 's3' (DigitalOcean Spaces)
 STORAGE_BACKEND = os.environ.get("STORAGE_BACKEND", "local")

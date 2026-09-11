@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Inspectit — Admin</title>
+<style>
+  :root { --blue:#1E64D3; --navy:#0B2138; --ok:#2E7D32; --attn:#EF6C00; --defect:#C62828;
+          --bg:#F4F6F9; --card:#fff; --line:#E1E6EE; --muted:#6B7280; --text:#111827; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  .hidden { display:none !important; }
+  header { background:var(--navy); color:#fff; padding:12px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header .sp { flex:1; }
+  header .who { font-size:13px; opacity:.85; }
+  nav { display:flex; gap:4px; padding:10px 20px 0; border-bottom:1px solid var(--line); background:#fff; }
+  nav button { background:none; border:0; padding:10px 14px; font:inherit; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
+  nav button.active { color:var(--blue); border-bottom-color:var(--blue); font-weight:600; }
+  main { padding:20px; max-width:1200px; margin:0 auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; }
+  .stat .n { font-size:26px; font-weight:700; color:var(--navy); }
+  .stat .l { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  tr:hover td { background:#FAFBFD; }
+  .muted { color:var(--muted); } .small { font-size:12px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; background:#EEF2F7; margin:1px 2px 1px 0; }
+  .pill.admin { background:#E3EDFB; color:var(--blue); }
+  .pill.off { background:#FDECEC; color:var(--defect); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  input, select { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; min-width:200px; }
+  button.btn { font:inherit; padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:#fff; cursor:pointer; }
+  button.btn.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  button.btn.danger { color:var(--defect); }
+  button.btn.sm { padding:4px 9px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:default; }
+  .err { color:var(--defect); margin-top:8px; min-height:1.3em; }
+  .login { max-width:380px; margin:80px auto; }
+  .secret { background:#FFF8E1; border:1px solid #F5D77A; border-radius:8px; padding:12px; margin-top:12px; font-family:ui-monospace,Menlo,monospace; word-break:break-all; }
+  .bar { display:inline-block; height:8px; background:var(--blue); border-radius:3px; vertical-align:middle; }
+</style>
+</head>
+<body>
+
+<div id="screen-login" class="login card">
+  <h2>Inspectit admin</h2>
+  <p class="muted small">Sign in with a platform-admin account.</p>
+  <form id="loginForm">
+    <label>Email</label><input id="email" type="email" autocomplete="username" required style="width:100%">
+    <label style="margin-top:10px">Password</label><input id="password" type="password" autocomplete="current-password" required style="width:100%">
+    <div class="err" id="loginErr"></div>
+    <button class="btn primary" id="loginBtn" type="submit" style="width:100%">Sign in</button>
+  </form>
+</div>
+
+<div id="screen-app" class="hidden">
+  <header>
+    <h1>Inspectit admin</h1>
+    <span class="sp"></span>
+    <span class="who" id="who"></span>
+    <button class="btn sm" id="logout">Sign out</button>
+  </header>
+  <nav>
+    <button data-tab="stats" class="active">Usage</button>
+    <button data-tab="users">Users</button>
+    <button data-tab="companies">Companies</button>
+  </nav>
+  <main>
+    <section id="tab-stats">
+      <div class="grid" id="statGrid"></div>
+      <div class="card" style="margin-top:16px"><h2>Signups — last 30 days</h2><div id="signupChart" class="small"></div></div>
+      <div class="row" style="align-items:stretch">
+        <div class="card" style="flex:1;min-width:320px"><h2>Most recently active companies</h2><table id="topCompanies"></table></div>
+        <div class="card" style="flex:1;min-width:320px"><h2>Recent logins</h2><table id="recentLogins"></table></div>
+      </div>
+    </section>
+
+    <section id="tab-users" class="hidden">
+      <div class="card">
+        <h2>Create user</h2>
+        <div class="row">
+          <div><label>Name</label><input id="cName"></div>
+          <div><label>Email</label><input id="cEmail" type="email"></div>
+          <div><label>Password <span class="muted">(blank = generate)</span></label><input id="cPass" type="text" autocomplete="off"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div><label>Company</label>
+            <select id="cCompany"><option value="">— none —</option><option value="__new__">+ New company…</option></select></div>
+          <div id="cNewCoWrap" class="hidden"><label>New company name</label><input id="cNewCo"></div>
+          <div><label>Role</label><select id="cRole"></select></div>
+          <div><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cAdmin" style="min-width:0"> Platform admin</label></div>
+          <button class="btn primary" id="createBtn">Create</button>
+        </div>
+        <div class="err" id="createErr"></div>
+        <div id="createOut" class="secret hidden"></div>
+      </div>
+      <div class="card">
+        <div class="row">
+          <div style="flex:1"><label>Search</label><input id="uSearch" placeholder="email or name" style="width:100%"></div>
+          <button class="btn" id="uRefresh">Refresh</button>
+        </div>
+        <p class="small muted" id="uCount"></p>
+        <table id="userTable"></table>
+        <div id="resetOut" class="secret hidden"></div>
+      </div>
+    </section>
+
+    <section id="tab-companies" class="hidden">
+      <div class="card"><table id="companyTable"></table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* Same-origin API (the API serves this page), same shape as the app. */
+const API = /^https?:$/.test(location.protocol) ? location.origin : "http://127.0.0.1:8100";
+const SKEY = "inspectit.admin.session";
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const fmtDate = s => s ? new Date(s).toLocaleString() : "—";
+const ago = s => { if (!s) return "never"; const d = (Date.now() - new Date(s)) / 1000;
+  if (d < 60) return "just now"; if (d < 3600) return Math.floor(d/60) + " min ago";
+  if (d < 86400) return Math.floor(d/3600) + " h ago"; return Math.floor(d/86400) + " d ago"; };
+const bytes = n => { n = Number(n||0); const u = ["B","KB","MB","GB"]; let i = 0; while (n >= 1024 && i < 3) { n /= 1024; i++; } return n.toFixed(i ? 1 : 0) + " " + u[i]; };
+
+let session = null;
+try { session = JSON.parse(sessionStorage.getItem(SKEY)); } catch (_) {}
+function saveSession(s) { session = s; if (s) sessionStorage.setItem(SKEY, JSON.stringify(s)); else sessionStorage.removeItem(SKEY); }
+
+async function api(path, opts, retry) {
+  opts = opts || {};
+  const r = await fetch(API + path, {
+    method: opts.method || "GET",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + (session && session.access) },
+    body: opts.body != null ? JSON.stringify(opts.body) : undefined });
+  if (r.status === 401 && !retry && session && session.refresh) {
+    const rr = await fetch(API + "/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: session.refresh }) });
+    if (rr.ok) { const t = await rr.json(); saveSession({ ...session, access: t.access_token, refresh: t.refresh_token }); return api(path, opts, true); }
+    saveSession(null); showLogin(); throw new Error("Session expired");
+  }
+  let out = null; try { out = await r.json(); } catch (_) {}
+  if (!r.ok) {
+    const d = out && out.detail;
+    throw new Error(typeof d === "string" ? d : d ? JSON.stringify(d) : "Request failed (" + r.status + ")");
+  }
+  return { data: out, total: r.headers.get("X-Total-Count") };
+}
+
+/* ---------- login ---------- */
+function showLogin() { $("screen-login").classList.remove("hidden"); $("screen-app").classList.add("hidden"); }
+function showApp() { $("screen-login").classList.add("hidden"); $("screen-app").classList.remove("hidden"); }
+
+$("loginForm").addEventListener("submit", async e => {
+  e.preventDefault(); $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  try {
+    const r = await fetch(API + "/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("email").value.trim(), password: $("password").value }) });
+    const t = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(t.detail || "Sign-in failed (" + r.status + ")");
+    saveSession({ access: t.access_token, refresh: t.refresh_token, email: $("email").value.trim() });
+    await boot();
+  } catch (ex) { $("loginErr").textContent = ex.message; }
+  finally { $("loginBtn").disabled = false; }
+});
+$("logout").addEventListener("click", () => { saveSession(null); showLogin(); });
+
+async function boot() {
+  if (!session) { showLogin(); return; }
+  try {
+    await api("/admin/stats");           // 403 here = signed in but not a platform admin
+  } catch (ex) {
+    if (/Platform admin/.test(ex.message)) { saveSession(null); showLogin(); $("loginErr").textContent = "That account is not a platform admin. Add its email to PLATFORM_ADMIN_EMAILS and redeploy."; }
+    else if (ex.message !== "Session expired") { $("loginErr").textContent = ex.message; showLogin(); }
+    return;
+  }
+  $("who").textContent = session.email || "";
+  showApp(); setTab("stats");
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+function setTab(name) {
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  ["stats","users","companies"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== name));
+  if (name === "stats") loadStats();
+  if (name === "users") { loadCompaniesInto(); loadRoles(); loadUsers(); }
+  if (name === "companies") loadCompanies();
+}
+
+/* ---------- stats ---------- */
+async function loadStats() {
+  const { data: s } = await api("/admin/stats");
+  const T = s.totals, A = s.activity;
+  const stats = [
+    ["Users", T.users], ["Companies", T.companies], ["Active memberships", T.active_memberships],
+    ["Logins 24h", A.logins_24h], ["Logins 7d", A.logins_7d], ["Logins 30d", A.logins_30d],
+    ["Signups 7d", A.signups_7d], ["Signups 30d", A.signups_30d],
+    ["Live sessions", T.live_sessions], ["Collections synced 24h", A.syncs_24h],
+    ["Files", T.files + " · " + bytes(T.file_bytes)], ["Pending invites", T.pending_invitations],
+    ["Disabled users", T.users_disabled], ["Platform admins", T.platform_admins],
+  ];
+  $("statGrid").innerHTML = stats.map(([l, n]) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join("");
+  const max = Math.max(1, ...s.signups_daily.map(d => d.n));
+  $("signupChart").innerHTML = s.signups_daily.length
+    ? s.signups_daily.map(d => `<div>${esc(d.day)} <span class="bar" style="width:${Math.round(220 * d.n / max)}px"></span> ${d.n}</div>`).join("")
+    : '<span class="muted">No signups in the last 30 days.</span>';
+  $("topCompanies").innerHTML = "<tr><th>Company</th><th>Members</th><th>Last sync</th></tr>" +
+    s.top_companies.map(c => `<tr><td>${esc(c.name)}</td><td>${c.members}</td><td class="muted">${esc(ago(c.last_sync_at))}</td></tr>`).join("");
+  $("recentLogins").innerHTML = "<tr><th>User</th><th>When</th></tr>" +
+    s.recent_logins.map(u => `<tr><td>${esc(u.name)}<div class="small muted">${esc(u.email)}</div></td><td class="muted">${esc(ago(u.last_login_at))}</td></tr>`).join("");
+}
+
+/* ---------- companies ---------- */
+let companyCache = [];
+async function loadCompaniesInto() {
+  const { data } = await api("/admin/companies");
+  companyCache = data;
+  const sel = $("cCompany"); const cur = sel.value;
+  sel.innerHTML = '<option value="">— none —</option><option value="__new__">+ New company…</option>' +
+    data.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${c.members})</option>`).join("");
+  sel.value = cur;
+}
+async function loadCompanies() {
+  const { data } = await api("/admin/companies");
+  $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Created</th><th>ID</th></tr>" +
+    data.map(c => `<tr><td>${esc(c.name)}</td><td>${c.members}</td><td class="muted">${esc(fmtDate(c.created_at))}</td><td class="small muted">${esc(c.id)}</td></tr>`).join("");
+}
+$("cCompany").addEventListener("change", () => $("cNewCoWrap").classList.toggle("hidden", $("cCompany").value !== "__new__"));
+
+/* Roles are the built-in presets; any company's /roles lists them, so use the
+   first company we know about (there's always at least the admin's own). */
+async function loadRoles() {
+  const sel = $("cRole"); if (sel.options.length) return;
+  const names = ["Company Administrator","Manager","Vehicle Manager","Property Manager","Project Manager","Vehicle Inspector","Property Inspector","Viewer"];
+  sel.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join("");
+}
+
+/* ---------- users ---------- */
+async function loadUsers() {
+  const q = $("uSearch").value.trim();
+  const { data, total } = await api("/admin/users?limit=200" + (q ? "&q=" + encodeURIComponent(q) : ""));
+  $("uCount").textContent = total + " user" + (total == 1 ? "" : "s");
+  $("userTable").innerHTML = "<tr><th>User</th><th>Companies / roles</th><th>Last login</th><th>Created</th><th></th></tr>" +
+    data.map(u => `<tr data-id="${esc(u.id)}">
+      <td>${esc(u.name)} ${u.is_platform_admin ? '<span class="pill admin">platform admin</span>' : ""} ${u.disabled_at ? '<span class="pill off">disabled</span>' : ""}
+          <div class="small muted">${esc(u.email)}</div></td>
+      <td>${u.memberships.map(m => `<div>${esc(m.company_name)} <span class="small muted">${(m.roles||[]).map(esc).join(", ")}</span></div>`).join("") || '<span class="muted">—</span>'}</td>
+      <td class="muted">${esc(ago(u.last_login_at))}</td>
+      <td class="muted small">${esc(fmtDate(u.created_at))}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" data-act="reset">Reset password</button>
+        <button class="btn sm ${u.disabled_at ? "" : "danger"}" data-act="toggle">${u.disabled_at ? "Enable" : "Disable"}</button>
+      </td></tr>`).join("");
+}
+$("uRefresh").addEventListener("click", loadUsers);
+let searchTimer; $("uSearch").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadUsers, 300); });
+
+$("userTable").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-act]"); if (!btn) return;
+  const tr = btn.closest("tr"); const id = tr.dataset.id;
+  const email = tr.querySelector(".small.muted").textContent;
+  btn.disabled = true;
+  try {
+    if (btn.dataset.act === "reset") {
+      const custom = prompt("New password for " + email + "\n(leave blank to generate one):", "");
+      if (custom === null) return;
+      const { data } = await api("/admin/users/" + id + "/reset-password", { method: "POST", body: custom ? { password: custom } : {} });
+      const o = $("resetOut"); o.classList.remove("hidden");
+      o.textContent = "Password for " + data.email + " is now: " + data.password + "   (shown once — copy it now; all their sessions were signed out)";
+    } else {
+      const disabling = btn.textContent === "Disable";
+      if (disabling && !confirm("Disable " + email + "? They will be signed out and unable to log in.")) return;
+      await api("/admin/users/" + id, { method: "PATCH", body: { disabled: disabling } });
+      await loadUsers();
+    }
+  } catch (ex) { alert(ex.message); }
+  finally { btn.disabled = false; }
+});
+
+$("createBtn").addEventListener("click", async () => {
+  $("createErr").textContent = ""; $("createOut").classList.add("hidden"); $("createBtn").disabled = true;
+  try {
+    const co = $("cCompany").value;
+    const body = { name: $("cName").value.trim(), email: $("cEmail").value.trim(), role: $("cRole").value,
+                   is_platform_admin: $("cAdmin").checked };
+    if ($("cPass").value) body.password = $("cPass").value;
+    if (co === "__new__") body.company_name = $("cNewCo").value.trim();
+    else if (co) body.company_id = co;
+    const { data } = await api("/admin/users", { method: "POST", body });
+    const o = $("createOut"); o.classList.remove("hidden");
+    o.textContent = "Created " + data.email + ". Password: " + data.password + (data.password_generated ? "   (generated — shown once, copy it now)" : "");
+    ["cName","cEmail","cPass","cNewCo"].forEach(i => $(i).value = ""); $("cAdmin").checked = false;
+    await loadUsers(); await loadCompaniesInto();
+  } catch (ex) { $("createErr").textContent = ex.message; }
+  finally { $("createBtn").disabled = false; }
+});
+
+boot();
+</script>
+</body>
+</html>

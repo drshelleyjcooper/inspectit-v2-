@@ -511,7 +511,8 @@
 
     <p class="login-foot">
       <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.7"/></svg>
-      <a href="#" id="loginModeSwitch">New here? Create a company account</a>
+      <span id="loginFootNote">Forgot your password? Ask your company administrator to reset it.</span>
+      <a href="#" id="loginModeSwitch" class="hidden"></a>
     </p>
   </div>
 </div>
@@ -1498,7 +1499,8 @@ async function cloudSignIn(api, email, password) {
 
 async function cloudCreateAccount(api, companyName, yourName, email, password) {
   const t = await cloudLoginRequest(api, "/auth/signup",
-    { company_name: companyName, name: yourName, email: email, password: password });
+    { company_name: companyName, name: yourName, email: email, password: password,
+      signup_code: SIGNUP_CODE || undefined });
   /* the account creator is the company's first administrator */
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
                  company: t.company_id, companyName: companyName,
@@ -1613,7 +1615,14 @@ async function acceptInvitation(token, name, password) {
   return out || {};
 }
 
-let loginMode = INVITE_TOKEN ? "accept" : "create";   // "create" | "signin" | "accept"
+/* The public app only offers sign-in. Account creation is reachable through
+   a private link: /web/inspectit-app.html?signup   (or ?signup=<code> when
+   the server has SIGNUP_CODE set). The code is sent with the signup request.
+   An invitation link (?invite=<token>) takes precedence over both. */
+const SIGNUP_PARAM = new URLSearchParams(location.search).get("signup");
+const SIGNUP_LINK = SIGNUP_PARAM !== null;
+const SIGNUP_CODE = SIGNUP_PARAM || "";
+let loginMode = INVITE_TOKEN ? "accept" : (SIGNUP_LINK ? "create" : "signin");   // "create" | "signin" | "accept"
 
 /* An invitation can land on an email that already has an Inspectit account —
    people belong to more than one company. The server won't let a link set a new
@@ -1636,7 +1645,7 @@ function showAcceptExisting(message) {
 }
 function renderLogin() {
   const c = cloudCfg();
-  if (c && c.email && loginMode !== "accept") loginMode = "signin";
+  if (c && c.email && loginMode !== "accept" && !SIGNUP_LINK) loginMode = "signin";
   const accepting = loginMode === "accept";
   const creating = loginMode === "create";
   $("loginSubtitle").textContent = accepting
@@ -1650,10 +1659,11 @@ function renderLogin() {
   $("emailRow").classList.toggle("hidden", accepting);   // the token carries the email
   $("loginSubmit").textContent = accepting ? "Accept invitation"
     : creating ? "Create account" : "Sign in";
-  $("loginModeSwitch").classList.toggle("hidden", accepting);
+  $("loginFootNote").classList.toggle("hidden", accepting || SIGNUP_LINK);
+  $("loginModeSwitch").classList.toggle("hidden", accepting || !SIGNUP_LINK);
   $("loginModeSwitch").textContent = creating
     ? "Already have an account? Sign in"
-    : "New here? Create a company account";
+    : "Create a company account";
   $("loginCompany").value = "";
   $("loginName").value = "";
   $("loginEmail").value = (c && c.email) || "";
