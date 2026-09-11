@@ -1,6 +1,6 @@
 # Inspectit — Users, Roles & Permissions
 
-**Version:** 2.14 · **Date:** 2026-09-11 · **Status:** specified, settled,
+**Version:** 2.15 · **Date:** 2026-09-11 · **Status:** specified, settled,
 written, and applied — every step in §8 is committed on `user-roles-v2` with
 the full suite green (1,223 tests)
 **Supersedes:** v1.1 (2026-08-29), which is shipped in `inspectit-app.html`
@@ -924,6 +924,27 @@ the tool's module: every field disabled, those controls hidden, "view only"
 in the heading. Covers both schedulers, so Property Viewer and Viewer get
 the same on the property side. History toggles and the card summary stay.
 No server change.
+
+**2026-09-11 — the Users & roles list is scoped to the manager's domain.**
+Decided by Brandon: a Vehicle Manager sees only the members and pending
+invitations holding vehicle roles, a Property Manager only property roles,
+a Project Manager only project roles. Company Administrator and Manager
+see everyone. In the app, `ROLE_DOMAIN` maps the ten domain presets to
+their domain, `visibleRoleDomains()` reads the signed-in member's held
+roles (a dual Vehicle + Property Manager sees the union), and
+`renderUsersPanel()` drops members and invitations outside it; a note
+above the list says which roles are shown. A member holding no
+recognised preset is hidden from a domain manager, since nothing ties
+them to its domain. Strict reading of the three domains: project roles
+sit under Project Manager, not Property Manager, even though the latter
+edits projects (§4.1). Verified against the seeded company: 4 / 4 / 2
+rows for the three domain managers, 13 for Manager and Company
+Administrator.
+
+The API is unchanged: `GET /companies/{id}/members` still returns the
+full list to any `company:assign` holder, and the invite form was already
+limited by §4.2 grants. Moving the scoping server-side is a §11 follow-up
+if the list is ever treated as confidential rather than as clutter.
 
 **Open after the same sweep, decision needed (not changed):**
 - §3 and §9.3 say `company:admin` gates backup import. `POST /import/backup`

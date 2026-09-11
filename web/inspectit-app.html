@@ -982,6 +982,40 @@ function canManageUsers() {
   return grantableRoleIds().length > 0;
 }
 
+/* Which domain a preset belongs to, for scoping the Users & roles list. A
+   domain manager sees only the people in its own domain — a Vehicle Manager
+   the vehicle roles, a Property Manager the property roles, a Project
+   Manager the project roles (decided 2026-09-11). Company Administrator and
+   Manager see everyone; so does the company-wide Viewer if it ever reaches
+   the panel (it can't grant, so it doesn't). */
+const ROLE_DOMAIN = {
+  vehicle_manager: "vehicle", vehicle_inspector: "vehicle",
+  vehicle_maintenance: "vehicle", vehicle_viewer: "vehicle",
+  property_manager: "property", property_inspector: "property",
+  property_maintenance: "property", property_viewer: "property",
+  project_manager: "project", project_viewer: "project"
+};
+
+/* null = no scoping (sees everyone); otherwise the set of domains the
+   signed-in member manages. */
+function visibleRoleDomains() {
+  if (!permsActive()) return null;
+  const mine = myRoleIds();
+  if (mine.some(id => id === "company_admin" || id === "manager" || id === "viewer")) return null;
+  const out = [];
+  mine.forEach(id => { const d = ROLE_DOMAIN[id]; if (d && out.indexOf(d) === -1) out.push(d); });
+  return out;
+}
+
+/* Does a member (or invitation) holding these role ids belong in the list
+   the signed-in member may see? Unrecognised or missing roles are hidden
+   from a domain manager: nothing ties them to its domain. */
+function memberInMyDomains(heldIds) {
+  const domains = visibleRoleDomains();
+  if (!domains) return true;
+  return (heldIds || []).some(id => domains.indexOf(ROLE_DOMAIN[id]) !== -1);
+}
+
 function canGrantRole(targetId) {
   if (!permsActive()) return true;
   return grantableRoleIds().indexOf(targetId) !== -1;
@@ -2527,7 +2561,10 @@ async function renderUsersPanel() {
   const rmap = await apiRolesMap();
   const ops = await memberOps();
   const mine = cloudCfg().email;
-  const rows = (members || []).map(m => {
+  const domains = visibleRoleDomains();
+  const rows = (members || []).filter(m =>
+    memberInMyDomains(roleLabels(m, rmap).map(r => roleKey(r)).filter(Boolean))
+  ).map(m => {
     const email = m.email || (m.user && m.user.email) || "";
     const name = m.name || (m.user && m.user.name) ||
                  [m.first_name, m.last_name].filter(Boolean).join(" ") ||
@@ -2556,6 +2593,7 @@ async function renderUsersPanel() {
       const memo = inviteRoleFor(iEmail);
       if (memo) roleNames = [memo];
     }
+    if (!memberInMyDomains(roleNames.map(r => roleKey(r)).filter(Boolean))) return "";
     const who = i.name || i.full_name ||
                 [i.first_name, i.last_name].filter(Boolean).join(" ") ||
                 inviteNameFor(iEmail);
@@ -2575,8 +2613,13 @@ async function renderUsersPanel() {
   }).join("");
 
   const grantable = grantableRoleIds();
+  const scopeNote = domains
+    ? `<p class="pc-meta" style="margin:0 0 10px;">Showing the ${
+        domains.map(d => d + " roles").join(" and ")} you manage. Managers and
+        administrators see everyone.</p>` : "";
   body.innerHTML =
-    `<ul class="user-list">${rows || `<li style="justify-content:center;color:var(--muted);">No members yet.</li>`}</ul>
+    `${scopeNote}<ul class="user-list">${rows || `<li style="justify-content:center;color:var(--muted);">${
+        domains ? "No one in your domain yet." : "No members yet."}</li>`}</ul>
      ${ops.remove ? "" : `<p class="pc-meta" style="margin:-8px 0 0;">Members can't be
        removed or have their role changed from here — this server's members endpoint is
        read-only. Adding DELETE and PATCH to it turns these controls on.</p>`}
