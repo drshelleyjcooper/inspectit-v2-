@@ -140,6 +140,8 @@ automatic database migrations, and dual storage backends.
 **Members** (`/companies/{id}/...`)
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` (company) | Read the company record (any member) |
+| PATCH | `/` (company) | Rename the company — `{name}`; needs company:edit (Administrator, Manager) |
 | GET | `/roles` | List roles (presets + company custom) |
 | GET | `/members` | List company members with roles |
 | POST | `/invitations` | Invite user by email with role assignment |

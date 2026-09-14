@@ -2068,13 +2068,47 @@ $("btnImport").addEventListener("click", () => {
 $("btnCloud").addEventListener("click", () => {
   if (cloudSignedIn()) {
     const c = cloudCfg();
+    /* Renaming the company is company:edit — Company Administrator and Manager
+       (§4.1). The server enforces it; the field is only offered to them. */
+    const canRename = can("company", "edit");
     const close = openModal("Cloud sync",
       `<p>Signed in as <b>${esc(c.email)}</b>${c.companyName ? " — " + esc(c.companyName) : ""}.</p>
        <p>Your data syncs to the cloud automatically as you work, and updates from
           other devices are pulled in when you open the app.</p>
+       ${canRename ? `<div class="add-user-row" style="margin-top:14px;">
+         <label class="field"><span>Company name</span>
+           <input type="text" id="cloudCompanyName" maxlength="120"
+                  value="${esc(c.companyName || "")}" autocomplete="organization"></label>
+         <button class="ghost" id="cloudRenameBtn" style="height:42px;">Rename</button>
+       </div>
+       <p class="pc-meta" style="margin:4px 0 0;">This is the company name everyone in
+          the company sees when they sign in. Your own profile card on Home is separate.</p>` : ""}
        <p class="form-error" id="cloudErr" role="alert"></p>`,
       `<button class="ghost" id="cloudSignOutBtn">Sign out</button>
        <button class="primary" id="cloudSyncNowBtn">Sync now</button>`);
+    const rn = $("cloudRenameBtn");
+    if (rn) rn.addEventListener("click", async () => {
+      const name = $("cloudCompanyName").value.trim().replace(/\s+/g, " ");
+      const e = $("cloudErr");
+      e.textContent = "";
+      if (!name) { e.textContent = "Enter a company name."; return; }
+      if (name === (c.companyName || "")) { e.textContent = "That's already the company's name."; return; }
+      rn.disabled = true; rn.textContent = "Renaming…";
+      try {
+        const r = await cloudFetch("/companies/" + c.company, { method: "PATCH", body: { name: name } });
+        if (!r.ok) throw new Error(await apiErrorText(r, "Rename failed"));
+        let saved = name;
+        try { const d = await r.json(); if (d && d.name) saved = d.name; } catch (_) {}
+        const cur = cloudCfg();
+        if (cur) { cur.companyName = saved; cloudSaveCfg(cur); }
+        renderCloudStatus();
+        toast("Company renamed to " + saved);
+        close();
+      } catch (err) {
+        e.textContent = (err && err.message) || "Rename failed — is the server reachable?";
+        rn.disabled = false; rn.textContent = "Rename";
+      }
+    });
     $("cloudSyncNowBtn").addEventListener("click", async () => {
       $("cloudErr").textContent = "";
       $("cloudSyncNowBtn").disabled = true;

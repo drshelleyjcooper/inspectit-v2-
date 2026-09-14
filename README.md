@@ -53,6 +53,24 @@ response. `/auth/*` is rate-limited to 10/min per IP by default and the script
 makes 13 auth calls, so expect one pause of up to a minute; set
 `AUTH_RATE_LIMIT=100` in the environment before launching the API to skip it.
 
+## Turn an existing company into a demo model
+
+`seed_demo_members.py` signs in as a company's administrator on any server —
+including the live one — optionally renames the company, then invites and
+accepts one dummy member per preset role that has nobody yet. Re-running is
+safe: roles that already have a member are skipped.
+
+```bash
+.venv/bin/python seed_demo_members.py --api https://inspectit.app \
+    --admin you@company.com --rename "Cooper Test" --domain coopertest.example
+```
+
+It prompts for the administrator's password and for the password to give every
+dummy member; nothing is stored. Dummy addresses are `<role>@<domain>` — no
+mail is sent, so the domain never needs to exist. The company name can also be
+changed from the app: Cloud sync → Company name → Rename (Company Administrator
+and Manager only; it calls `PATCH /companies/{id}`).
+
 ## Tests
 
 ```bash

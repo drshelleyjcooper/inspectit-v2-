@@ -21,8 +21,8 @@ from .ratelimit import client_ip
 from .requestmeta import RequestMetaMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from .routers import (admin, assignments, auth, collections, entities,
-                      importer, me, members)
+from .routers import (admin, assignments, auth, collections, companies,
+                      entities, importer, me, members)
 
 
 log = logging.getLogger("inspectit")
@@ -69,6 +69,7 @@ app.add_middleware(AccessLogMiddleware)
 app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(members.router)
+app.include_router(companies.router)
 app.include_router(entities.router)
 app.include_router(assignments.router)
 app.include_router(importer.router)
