@@ -1,5 +1,16 @@
 name: inspectit
 region: nyc
+
+# Both hostnames are served by the api service below. The apex is primary;
+# rel="canonical" and og:url in index.html also point there, so search
+# engines consolidate on it regardless of which host a visitor arrives on.
+# DigitalOcean manages the DNS zone (ns1-3.digitalocean.com), so adding the
+# domain on the app creates the record and provisions the TLS certificate.
+domains:
+  - domain: inspectit.app
+    type: PRIMARY
+  - domain: www.inspectit.app
+    type: ALIAS
 services:
   - name: api
     github:
