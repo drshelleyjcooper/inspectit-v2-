@@ -92,17 +92,6 @@ ul,ol{list-style:none}
 .vbox__close::before{transform:rotate(45deg)}
 .vbox__close::after{transform:rotate(-45deg)}
 
-/* language switcher */
-.lang-switch{position:relative}
-.lang-switch__btn{display:flex;align-items:center;gap:4px;font-size:.88rem;font-weight:500;color:var(--muted);padding:6px 10px;border-radius:6px;transition:background .2s}
-.lang-switch__btn:hover{background:var(--mist)}
-.lang-switch__btn svg{width:16px;height:16px;flex-shrink:0}
-.lang-switch__menu{display:none;position:absolute;top:calc(100% + 8px);right:0;background:var(--white);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.12);min-width:180px;padding:6px 0;z-index:110}
-.lang-switch__menu.open{display:block}
-.lang-switch__menu button{display:block;width:100%;text-align:left;padding:8px 16px;font-size:.88rem;color:var(--ink);transition:background .15s}
-.lang-switch__menu button:hover{background:var(--mist)}
-.lang-switch__menu button.active{color:var(--blue);font-weight:600}
-
 /* mobile hamburger */
 .nav__hamburger{display:none;flex-direction:column;gap:5px;padding:8px;width:40px;height:40px;justify-content:center;align-items:center}
 .nav__hamburger span{display:block;width:22px;height:2px;background:var(--ink);border-radius:2px;transition:transform .3s,opacity .2s}
@@ -116,11 +105,9 @@ ul,ol{list-style:none}
 .mobile-drawer a,.mobile-drawer button{display:block;padding:14px 0;font-size:1.1rem;font-weight:500;color:var(--ink);border-bottom:1px solid var(--line)}
 .mobile-drawer a:last-child{border-bottom:none}
 .mobile-drawer .drawer-cta{margin-top:24px;text-align:center;padding:14px;background:var(--blue);color:var(--white);border-radius:10px;border-bottom:none;font-weight:600}
-.mobile-drawer .drawer-lang{margin-top:16px;font-size:.92rem;color:var(--muted);border-bottom:none;padding:10px 0}
-.mobile-drawer .drawer-lang select{margin-left:8px;font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--white)}
 
 @media(max-width:900px){
-  .nav__links,.lang-switch{display:none}
+  .nav__links{display:none}
   .nav__hamburger{display:flex}
 }
 
@@ -291,25 +278,6 @@ ul,ol{list-style:none}
       <a href="#faq">FAQ</a>
       <a href="#partners">About Us</a>
       <a href="mailto:info@inspectit.app">Contact Us</a>
-      <div class="lang-switch">
-        <button class="lang-switch__btn" id="langBtn" aria-expanded="false" aria-haspopup="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg>
-          EN
-          <svg viewBox="0 0 20 20" fill="currentColor" style="width:12px;height:12px"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"/></svg>
-        </button>
-        <div class="lang-switch__menu" id="langMenu" role="menu">
-          <button role="menuitem" class="active" data-lang="en">English</button>
-          <button role="menuitem" data-lang="hi">Hindi</button>
-          <button role="menuitem" data-lang="es">Spanish</button>
-          <button role="menuitem" data-lang="fr">French</button>
-          <button role="menuitem" data-lang="de">German</button>
-          <button role="menuitem" data-lang="ar">Arabic</button>
-          <button role="menuitem" data-lang="zh">Chinese</button>
-          <button role="menuitem" data-lang="pt">Portuguese</button>
-          <button role="menuitem" data-lang="ru">Russian</button>
-          <button role="menuitem" data-lang="ja">Japanese</button>
-        </div>
-      </div>
       <button type="button" class="btn-demo" data-video><span class="play" aria-hidden="true"></span>Demo video</button>
       <a href="web/inspectit-app.html" class="nav__cta">Log In</a>
     </div>
@@ -325,21 +293,6 @@ ul,ol{list-style:none}
   <a href="#faq" class="drawer-link">FAQ</a>
   <a href="#partners" class="drawer-link">About Us</a>
   <a href="mailto:info@inspectit.app" class="drawer-link">Contact Us</a>
-  <div class="drawer-lang">
-    Language:
-    <select id="mobileLangSelect" aria-label="Language">
-      <option value="en" selected>English</option>
-      <option value="hi">Hindi</option>
-      <option value="es">Spanish</option>
-      <option value="fr">French</option>
-      <option value="de">German</option>
-      <option value="ar">Arabic</option>
-      <option value="zh">Chinese</option>
-      <option value="pt">Portuguese</option>
-      <option value="ru">Russian</option>
-      <option value="ja">Japanese</option>
-    </select>
-  </div>
   <a href="web/inspectit-app.html" class="drawer-cta">Log In</a>
   <button type="button" class="drawer-demo" data-video><span class="play" aria-hidden="true"></span>Demo video</button>
 </div>
@@ -439,31 +392,10 @@ ul,ol{list-style:none}
     </div>
     <div class="feature-card rv" style="transition-delay:140ms">
       <div class="feature-card__icon">
-        <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 00-2 2v12a2 2 0 002 2h14l4 4V4a2 2 0 00-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
-      </div>
-      <h3 class="feature-card__title">Community Message Board</h3>
-      <p class="feature-card__desc">Communicate with tenants, contractors, and team members through a centralized message board built for property management workflows.</p>
-    </div>
-    <div class="feature-card rv" style="transition-delay:210ms">
-      <div class="feature-card__icon">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm4 18H6V4h7v5h5v11zM8 15h8v2H8v-2zm0-3h8v2H8v-2z"/></svg>
       </div>
       <h3 class="feature-card__title">Digital Document Hub</h3>
       <p class="feature-card__desc">Store warranties, contracts, receipts, and inspection reports in one secure digital hub. Access everything you need, when you need it.</p>
-    </div>
-    <div class="feature-card rv" style="transition-delay:280ms">
-      <div class="feature-card__icon" style="background:var(--navy-2)">
-        <svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zM7.5 13A2.5 2.5 0 005 15.5 2.5 2.5 0 007.5 18a2.5 2.5 0 002.5-2.5A2.5 2.5 0 007.5 13zm9 0a2.5 2.5 0 00-2.5 2.5 2.5 2.5 0 002.5 2.5 2.5 2.5 0 002.5-2.5 2.5 2.5 0 00-2.5-2.5z"/></svg>
-      </div>
-      <h3 class="feature-card__title">Ask Bob A.I. Assistant</h3>
-      <p class="feature-card__desc">Get instant, personalized advice from Bob — your AI-powered project advisor. Ask about repairs, budgets, contractor selection, and more.</p>
-    </div>
-    <div class="feature-card rv" style="transition-delay:350ms">
-      <div class="feature-card__icon">
-        <svg viewBox="0 0 24 24"><path d="M12.87 15.07l-2.54-2.51.03-.03A17.52 17.52 0 0014.07 6H17V4h-7V2H8v2H1v1.99h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11.76-2.04zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2l-4.5-12zm-2.62 7l1.62-4.33L19.12 17h-3.24z"/></svg>
-      </div>
-      <h3 class="feature-card__title">Multi-Language Support</h3>
-      <p class="feature-card__desc">Available in 10 languages including English, Hindi, Spanish, French, German, Arabic, Chinese, Portuguese, Russian, and Japanese.</p>
     </div>
   </div>
 </section>
@@ -638,36 +570,6 @@ ul,ol{list-style:none}
       document.body.style.overflow = '';
     });
   });
-
-  // --- LANGUAGE SWITCHER (stub) ---
-  var langBtn = document.getElementById('langBtn');
-  var langMenu = document.getElementById('langMenu');
-  langBtn.addEventListener('click', function(e){
-    e.stopPropagation();
-    var open = langMenu.classList.toggle('open');
-    langBtn.setAttribute('aria-expanded', open);
-  });
-  langMenu.querySelectorAll('button').forEach(function(b){
-    b.addEventListener('click', function(){
-      var lang = this.getAttribute('data-lang');
-      langMenu.querySelectorAll('button').forEach(function(x){ x.classList.remove('active'); });
-      this.classList.add('active');
-      langBtn.childNodes[2].textContent = ' ' + lang.toUpperCase() + ' ';
-      langMenu.classList.remove('open');
-      langBtn.setAttribute('aria-expanded', 'false');
-      // stub: future i18n integration point
-      console.log('Language selected:', lang);
-    });
-  });
-  document.addEventListener('click', function(){ langMenu.classList.remove('open'); langBtn.setAttribute('aria-expanded','false'); });
-
-  // mobile lang select
-  var mobileLangSelect = document.getElementById('mobileLangSelect');
-  if(mobileLangSelect){
-    mobileLangSelect.addEventListener('change', function(){
-      console.log('Language selected:', this.value);
-    });
-  }
 
   // --- FAQ ACCORDION ---
   document.querySelectorAll('.faq__q').forEach(function(btn){
