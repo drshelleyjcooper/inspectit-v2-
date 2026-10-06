@@ -51,7 +51,7 @@ def test_demo_request_emails_info_address(client, smtp_on):
     assert "info@inspectit.app" in m["From"]
     assert m["Reply-To"] == f"dana-{t}@example.com"
     assert "Dana Q" in m["Subject"]
-    assert "9" in m.get_content()
+    assert "9" in m.get_body(("plain",)).get_content()
     assert smtp_on.logins == [("info@inspectit.app", "pw-not-real")]
 
 
@@ -69,7 +69,7 @@ def test_trial_signup_emails_owner_without_password(client, smtp_on):
         "track": "vehicles"})
     assert r.status_code == 200
     assert len(smtp_on.sent) == 1
-    body = smtp_on.sent[0].get_content()
+    body = smtp_on.sent[0].get_body(("plain",)).get_content()
     assert "Trial Tom" in body and "Tom Fleet" in body and "vehicles" in body
     assert "super-secret-pw" not in body and "super-secret-pw" not in str(smtp_on.sent[0])
 
@@ -145,3 +145,43 @@ def test_resend_failure_is_swallowed(client, monkeypatch):
         raise OSError("network down")
     monkeypatch.setattr(mailer.urllib.request, "urlopen", boom)
     assert mailer.send_mail("s", "b") is False
+
+
+def test_html_version_is_branded_and_matches_text():
+    from api import config, mailer
+    subject, body = mailer.password_reset_email(
+        "<Bob & Co>", "https://inspectit.app/reset-password?token=abc&x=1", 60)
+    assert isinstance(body, str) and body.button == "Choose a new password"
+    out = mailer.render_html(subject, body, body.button)
+    assert f'{config.APP_BASE_URL}/assets/email-logo.jpg' in out and 'alt="Inspectit.app"' in out
+    assert "#1e64d3" in out and ">Choose a new password</a>" in out
+    assert 'href="https://inspectit.app/reset-password?token=abc&amp;x=1"' in out
+    assert "&lt;Bob &amp; Co&gt;" in out and "<Bob" not in out            # escaped
+    assert "expires in 60 minutes" in out                                  # same words as text
+    assert out.count("Inspectit.app</strong>") == 1                         # signature -> footer
+
+
+def test_inline_links_and_no_button_emails():
+    from api import mailer
+    subject, body = mailer.password_changed_email("Ann", "https://inspectit.app/web/inspectit-app.html")
+    out = mailer.render_html(subject, body, body.button)
+    assert '<a href="https://inspectit.app/web/inspectit-app.html"' in out and "padding:14px 28px" not in out
+    subject, body = mailer.demo_request_email("Zed", "z@example.com", 3)
+    assert body.button is None and "Zed" in mailer.render_html(subject, body)
+
+
+def test_resend_and_smtp_send_html(client, smtp_on, monkeypatch):
+    import json
+    from api import config, mailer
+    subject, body = mailer.welcome_email("Ann", "Acme", "Viewer", "https://x.test/r?t=1", 60)
+    assert mailer.send_mail(subject, body, None, "ann@example.com") is True
+    msg = smtp_on.sent[-1]
+    assert msg.get_body(("plain",)).get_content().startswith("Hi Ann")
+    assert ">Set my password</a>" in msg.get_body(("html",)).get_content()
+    calls = []
+    monkeypatch.setattr(config, "RESEND_API_KEY", "re_not_real")
+    monkeypatch.setattr(mailer.urllib.request, "urlopen",
+                        lambda req, timeout=None: (calls.append(req), _Resp(200))[1])
+    assert mailer.send_mail(subject, body, None, "ann@example.com") is True
+    payload = json.loads(calls[0].data)
+    assert payload["text"] == str(body) and ">Set my password</a>" in payload["html"]
