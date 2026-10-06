@@ -48,6 +48,10 @@ KEY_MODULE = {
     "propertyWarranties": "property_warranties",
     "projects": "projects",
     "projectMeta": "projects",
+    # Inspection schedules (next inspection due by time and/or mileage):
+    # {entityId: {freq, miles, start}}. Settings, not records -> not delete-tracked.
+    "vehicleInspSchedule": "vehicle_inspections",
+    "propertyInspSchedule": "property_inspections",
     "diagram.auto": "vehicle_inspections",
     "diagram.van": "vehicle_inspections",
     "diagram.comm": "vehicle_inspections",

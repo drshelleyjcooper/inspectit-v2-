@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Depends
 
 from ..db import get_pool
+from ..trial import access_state, timeline
 from ..permissions import current_user
 
 router = APIRouter(tags=["me"])
@@ -12,7 +13,7 @@ def me(user: dict = Depends(current_user)):
     with get_pool().connection() as conn:
         memberships = conn.execute(
             """SELECT m.id AS membership_id, m.company_id, c.name AS company_name,
-                      m.can_grant_viewers
+                      m.can_grant_viewers, c.trial_ends_at, c.subscribed_at, c.complimentary
                FROM memberships m JOIN companies c ON c.id = m.company_id
                WHERE m.user_id = %s AND m.status = 'active'
                  AND m.deleted_at IS NULL AND c.deleted_at IS NULL""",
@@ -46,6 +47,14 @@ def me(user: dict = Depends(current_user)):
                           for r in roles],
                 "permissions": {k: sorted(v) for k, v in effective.items()},
                 "can_grant_viewers": bool(m["can_grant_viewers"]),
+                # 'none' | 'complimentary' | 'trialing' | 'grace' | 'subscribed' | 'suspended' | 'expired'. A suspended
+                # company's data routes answer 402; this lets the app say why.
+                "access": access_state(m["trial_ends_at"], m["subscribed_at"],
+                                       complimentary=m["complimentary"]),
+                "trial_ends_at": m["trial_ends_at"],
+                "grace_ends_at": (timeline(m["trial_ends_at"])["grace_ends_at"]
+                                  if m["trial_ends_at"] else None),
+                "subscribed": m["subscribed_at"] is not None,
             })
     return {
         "id": str(user["id"]), "email": user["email"], "name": user["name"],

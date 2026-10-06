@@ -1,0 +1,279 @@
+{
+ "property": {
+  "name": "Standard Property Maintenance",
+  "categories": [
+   {
+    "group": "Safety",
+    "items": [
+     {
+      "name": "Test Smoke Detectors",
+      "freq": "monthly"
+     },
+     {
+      "name": "Test Carbon Monoxide Detectors",
+      "freq": "monthly"
+     },
+     {
+      "name": "Fire Extinguishers (pressure/expiration)",
+      "freq": "monthly"
+     },
+     {
+      "name": "Emergency Lighting / Flashlights",
+      "freq": "monthly"
+     },
+     {
+      "name": "Emergency Shutoffs (water/gas/elec.)",
+      "freq": "annual"
+     },
+     {
+      "name": "Sprinkler System (Inspection/Service)",
+      "freq": "annual"
+     }
+    ]
+   },
+   {
+    "group": "HVAC",
+    "items": [
+     {
+      "name": "HVAC Air Filters",
+      "freq": "monthly"
+     },
+     {
+      "name": "Return Vents / Registers",
+      "freq": "quarterly"
+     },
+     {
+      "name": "Service Furnace / Heating",
+      "freq": "season:fall"
+     },
+     {
+      "name": "Service Air Conditioning",
+      "freq": "season:spring"
+     }
+    ]
+   },
+   {
+    "group": "Kitchen",
+    "items": [
+     {
+      "name": "Clean Refrigerator Coils",
+      "freq": "semiannual"
+     },
+     {
+      "name": "Clean Dishwasher Filter",
+      "freq": "monthly"
+     },
+     {
+      "name": "Clean Range Hood Filter",
+      "freq": "monthly"
+     },
+     {
+      "name": "Clean / Defrost Refrigerator",
+      "freq": "quarterly"
+     },
+     {
+      "name": "Clean / Defrost Freezer",
+      "freq": "semiannual"
+     }
+    ]
+   },
+   {
+    "group": "Bathrooms",
+    "items": [
+     {
+      "name": "Check Plumbing Leaks",
+      "freq": "quarterly"
+     },
+     {
+      "name": "Clean Drains",
+      "freq": "quarterly"
+     },
+     {
+      "name": "Check Caulking / Grout",
+      "freq": "annual"
+     },
+     {
+      "name": "Clean Fan Operation",
+      "freq": "semiannual"
+     }
+    ]
+   },
+   {
+    "group": "Laundry",
+    "items": [
+     {
+      "name": "Inspect Dryer Vent Opening",
+      "freq": "quarterly"
+     }
+    ]
+   },
+   {
+    "group": "Basement",
+    "items": [
+     {
+      "name": "Flush Water Heater",
+      "freq": "annual"
+     },
+     {
+      "name": "Clean Main Drain",
+      "freq": "annual"
+     }
+    ]
+   },
+   {
+    "group": "Exterior",
+    "items": [
+     {
+      "name": "Clean Gutters / Downspouts",
+      "freq": "season:fall"
+     }
+    ]
+   }
+  ]
+ },
+ "vehicle": {
+  "name": "Standard Vehicle Maintenance",
+  "categories": [
+   {
+    "group": "Engine",
+    "items": [
+     {
+      "name": "Oil & Filter Change",
+      "freq": "semiannual",
+      "miles": 5000
+     },
+     {
+      "name": "Engine Air Filter",
+      "freq": "annual",
+      "miles": 15000
+     },
+     {
+      "name": "Coolant Level / Condition",
+      "freq": "semiannual",
+      "miles": null
+     },
+     {
+      "name": "Drive Belts & Hoses",
+      "freq": "annual",
+      "miles": null
+     }
+    ]
+   },
+   {
+    "group": "Tires & Brakes",
+    "items": [
+     {
+      "name": "Tire Rotation",
+      "freq": "none",
+      "miles": 5000
+     },
+     {
+      "name": "Tire Pressure Check",
+      "freq": "monthly",
+      "miles": null
+     },
+     {
+      "name": "Tire Tread / Wear",
+      "freq": "quarterly",
+      "miles": null
+     },
+     {
+      "name": "Brake Inspection",
+      "freq": "annual",
+      "miles": 12000
+     },
+     {
+      "name": "Wheel Alignment",
+      "freq": "annual",
+      "miles": null
+     }
+    ]
+   },
+   {
+    "group": "Fluids",
+    "items": [
+     {
+      "name": "Transmission Fluid",
+      "freq": "none",
+      "miles": 30000
+     },
+     {
+      "name": "Brake Fluid",
+      "freq": "annual",
+      "miles": null
+     },
+     {
+      "name": "Power Steering Fluid",
+      "freq": "annual",
+      "miles": null
+     },
+     {
+      "name": "Washer Fluid Top-Up",
+      "freq": "quarterly",
+      "miles": null
+     }
+    ]
+   },
+   {
+    "group": "Electrical",
+    "items": [
+     {
+      "name": "Battery Test / Terminals",
+      "freq": "semiannual",
+      "miles": null
+     },
+     {
+      "name": "Lights & Turn Signals",
+      "freq": "monthly",
+      "miles": null
+     },
+     {
+      "name": "Wiper Blades",
+      "freq": "semiannual",
+      "miles": null
+     }
+    ]
+   },
+   {
+    "group": "Cabin",
+    "items": [
+     {
+      "name": "Cabin Air Filter",
+      "freq": "annual",
+      "miles": 15000
+     },
+     {
+      "name": "Interior Detail / Clean",
+      "freq": "quarterly",
+      "miles": null
+     },
+     {
+      "name": "Exterior Wash",
+      "freq": "monthly",
+      "miles": null
+     }
+    ]
+   },
+   {
+    "group": "Compliance",
+    "items": [
+     {
+      "name": "Registration Renewal",
+      "freq": "annual",
+      "miles": null
+     },
+     {
+      "name": "State Inspection",
+      "freq": "annual",
+      "miles": null
+     },
+     {
+      "name": "Insurance Renewal",
+      "freq": "annual",
+      "miles": null
+     }
+    ]
+   }
+  ]
+ }
+}

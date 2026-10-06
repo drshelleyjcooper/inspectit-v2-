@@ -245,6 +245,20 @@
   .footer-actions .spacer { flex: 1; }
   .backup-note { width: 100%; margin: 12px 2px 0; font-size: .85rem; color: var(--muted); }
   .backup-note.warn { color: var(--attn); font-weight: 600; }
+  /* calendar settings */
+  .cal-sec { margin: 0 0 18px; border: 0; padding: 0; }
+  .cal-sec legend, .cal-sec h4 { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; padding: 0; }
+  .cal-opt { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; font-size: .92rem; cursor: pointer; }
+  .cal-opt input { margin-top: 3px; flex: none; width: 18px; height: 18px; }
+  .cal-opt small { display: block; color: var(--muted); font-size: .8rem; }
+  .cal-note { font-size: .82rem; color: var(--muted); margin: 6px 0 0; }
+  .cal-note.warn { color: var(--attn); font-weight: 600; }
+  .cal-pick { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; margin-top: 6px; }
+  .cal-links { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cal-links a { display: flex; align-items: center; justify-content: center; text-align: center; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; text-decoration: none; color: var(--ink); font-size: .88rem; font-weight: 600; }
+  .cal-links a:hover, .cal-links a:focus-visible { border-color: var(--brand); color: var(--brand); }
+  .cal-copy { display: flex; gap: 8px; margin-top: 10px; }
+  .cal-copy input { flex: 1; min-width: 0; font-size: .8rem; }
 
   /* ---------- empty states (vehicles/houses/projects) ---------- */
   .empty {
@@ -511,7 +525,7 @@
 
     <p class="login-foot">
       <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="1.7"/><path d="M8 11V8a4 4 0 018 0v3" stroke="currentColor" stroke-width="1.7"/></svg>
-      <span id="loginFootNote">Forgot your password? Ask your company administrator to reset it.</span>
+      <span id="loginFootNote">Forgot your password? <a href="/forgot-password">Reset it by email</a>, or ask your company administrator.</span>
       <a href="#" id="loginModeSwitch" class="hidden"></a>
     </p>
   </div>
@@ -631,6 +645,7 @@
           <button class="ghost" id="btnExport" data-perm="company:admin">Export backup</button>
           <button class="ghost" id="btnImport" data-perm="company:admin">Import backup</button>
           <button class="ghost" id="btnCloud">Cloud sync</button>
+          <button class="ghost" id="btnCalendar">Calendar</button>
           <span class="spacer"></span>
           <button class="danger" id="btnLogout">Log out</button>
           <p class="backup-note" id="backupNote"></p>
@@ -673,7 +688,7 @@ const store = (() => {
     ? { get: k => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v), remove: k => localStorage.removeItem(k) }
     : { get: k => (k in mem ? mem[k] : null), set: (k, v) => { mem[k] = String(v); }, remove: k => { delete mem[k]; } };
 })();
-const K = { account: "inspectit.account", session: "inspectit.session", profile: "inspectit.profile", users: "inspectit.users", vehicles: "inspectit.vehicles", inspections: "inspectit.inspections", tickets: "inspectit.tickets", properties: "inspectit.properties", propertyTickets: "inspectit.propertyTickets", propertyInspections: "inspectit.propertyInspections", propertyMaintenance: "inspectit.propertyMaintenance", propertyMaintTemplates: "inspectit.propertyMaintTemplates", vehicleMaintenance: "inspectit.vehicleMaintenance", vehicleMaintTemplates: "inspectit.vehicleMaintTemplates", propertyWarranties: "inspectit.propertyWarranties", vehicleWarranties: "inspectit.vehicleWarranties", projects: "inspectit.projects", projectMeta: "inspectit.projectMeta", vehicleMaintSpend: "inspectit.vehicleMaintSpend", propertyMaintSpend: "inspectit.propertyMaintSpend" };
+const K = { account: "inspectit.account", session: "inspectit.session", profile: "inspectit.profile", users: "inspectit.users", vehicles: "inspectit.vehicles", inspections: "inspectit.inspections", tickets: "inspectit.tickets", properties: "inspectit.properties", propertyTickets: "inspectit.propertyTickets", propertyInspections: "inspectit.propertyInspections", propertyMaintenance: "inspectit.propertyMaintenance", propertyMaintTemplates: "inspectit.propertyMaintTemplates", vehicleMaintenance: "inspectit.vehicleMaintenance", vehicleMaintTemplates: "inspectit.vehicleMaintTemplates", propertyWarranties: "inspectit.propertyWarranties", vehicleWarranties: "inspectit.vehicleWarranties", projects: "inspectit.projects", projectMeta: "inspectit.projectMeta", vehicleMaintSpend: "inspectit.vehicleMaintSpend", propertyMaintSpend: "inspectit.propertyMaintSpend", vehicleInspSchedule: "inspectit.vehicleInspSchedule", propertyInspSchedule: "inspectit.propertyInspSchedule" };
 const getJSON = (k, fallback) => { try { const v = store.get(k); return v ? JSON.parse(v) : fallback; } catch (_) { return fallback; } };
 const setJSON = (k, v) => store.set(k, JSON.stringify(v));
 
@@ -1231,6 +1246,7 @@ const CLOUD_MODULE_BY_NAME = {
   propertyMaintTemplates: "property_maintenance", propertyMaintSpend: "property_maintenance",
   propertyWarranties: "property_warranties",
   projects: "projects", projectMeta: "projects",
+  vehicleInspSchedule: "vehicle_inspections", propertyInspSchedule: "property_inspections",
   profile: "company"
 };
 
@@ -2063,6 +2079,162 @@ $("btnImport").addEventListener("click", () => {
     reader.readAsText(f);
   });
 });
+
+/* ---------- calendar reminders (one-way subscription feed) ----------
+   Each member chooses what goes on their own calendar; the server builds a
+   private ICS link from the synced data (api/routers/calendar.py). Only the
+   categories the member's role can see are offered. */
+const CAL_CATS = {
+  maintenance:  ["Maintenance due dates", "From the maintenance scheduler"],
+  inspections:  ["Inspection dates", "From each vehicle's or property's inspection schedule"],
+  repairs:      ["Repair tickets", "Open tickets by their Due by date (or 14 days after the ticket date)"],
+  projects:     ["Project payment due dates", "Unpaid payments on active projects"],
+  warranties:   ["Warranty expiration dates", ""],
+  registration: ["Registration / renewal dates", "The vehicle schedule's Compliance items (registration, state inspection, insurance)"],
+};
+const CAL_ORDER = ["maintenance", "inspections", "repairs", "projects", "warranties", "registration"];
+function calNoCloudModal() {
+  const close = openModal("Calendar reminders",
+    `<p>Calendar reminders are built from your company's synced data, so <b>Cloud sync</b> needs to be on.</p>
+     <p class="cal-note">Click “Cloud sync” on the Home page to sign in, then come back here.</p>`,
+    `<button class="ghost" id="calNcClose">Close</button><button class="primary" id="calNcGo">Open Cloud sync</button>`);
+  $("calNcClose").onclick = close;
+  $("calNcGo").onclick = () => { close(); $("btnCloud").click(); };
+}
+async function openCalendarSettings() {
+  if (!cloudSignedIn()) return calNoCloudModal();
+  const c = cloudCfg();
+  const close = openModal("Calendar reminders", `<p id="calLoading">Loading your calendar settings…</p>`, `<button class="ghost" id="calX">Close</button>`);
+  $("calX").onclick = close;
+  let st;
+  try {
+    const r = await cloudFetch("/companies/" + c.company + "/calendar");
+    if (!r.ok) throw new Error(await apiErrorText(r, "Couldn't load calendar settings"));
+    st = await r.json();
+  } catch (e) {
+    const el = $("calLoading");
+    if (el) { el.className = "form-error"; el.setAttribute("role", "alert"); el.textContent = (e && e.message) || "Couldn't reach the server."; }
+    return;
+  }
+  calRender(st, close);
+}
+function calRender(st, closeOld) {
+  if (closeOld) closeOld();
+  const p = st.prefs;
+  const allowed = st.allowed || [];
+  const hidden = CAL_ORDER.filter(k => allowed.indexOf(k) < 0);
+  const vehs = getVehicles(), props = getProperties();
+  const selV = new Set(p.filter.vehicles || []), selP = new Set(p.filter.properties || []);
+  const showV = allowed.some(k => ["maintenance", "inspections", "repairs", "warranties", "registration"].includes(k));
+  const pick = (list, sel, kind) => list.map(x => `<label class="cal-opt"><input type="checkbox" data-cal-${kind}="${esc(x.id)}"${sel.has(x.id) ? " checked" : ""}><span>${esc(kind === "veh" ? (x.vehicleId + (x.makeModel ? " · " + x.makeModel : "")) : (x.propertyId + (x.address ? " · " + x.address : "")))}</span></label>`).join("") || `<p class="cal-note">None yet.</p>`;
+  const L = st.links;
+  const fmt = iso => iso ? new Date(iso).toLocaleString() : "";
+  const body = !allowed.length
+    ? `<p>Your role doesn't include any items that can go on a calendar.</p>`
+    : `${!st.has_data ? `<p class="cal-note warn">No vehicles or properties have synced yet, so your calendar will be empty until they do.</p>` : ""}
+      ${L ? `<section class="cal-sec" aria-labelledby="calAddH">
+        <h4 id="calAddH">Add to your calendar</h4>
+        <div class="cal-links">
+          <a href="${esc(L.webcal)}">Apple Calendar<br>(iPhone, iPad, Mac)</a>
+          <a href="${esc(L.google)}" target="_blank" rel="noopener noreferrer">Google Calendar</a>
+          <a href="${esc(L.outlook)}" target="_blank" rel="noopener noreferrer">Outlook.com</a>
+          <a href="${esc(L.outlook_work)}" target="_blank" rel="noopener noreferrer">Outlook<br>(work or school)</a>
+        </div>
+        <div class="cal-copy"><input type="text" id="calUrl" readonly value="${esc(L.url)}" aria-label="Your private calendar link"><button class="ghost" id="calCopy">Copy link</button></div>
+        <p class="cal-note"><b>Keep this link private</b> — anyone who has it can see this calendar. Reset it below if it's ever shared by mistake.</p>
+        <p class="cal-note">Google: add it from a computer (it then shows on your phone too). Google checks for changes on its own schedule — up to about a day — and uses your Google notification settings rather than the alert chosen here. Apple and Outlook check about every hour.</p>
+        ${st.last_accessed_at ? `<p class="cal-note">Last checked by a calendar app: ${esc(fmt(st.last_accessed_at))}</p>` : `<p class="cal-note">No calendar app has checked this link yet.</p>`}
+      </section>` : `<p class="cal-note" style="margin:0 0 16px;">Choose what goes on your calendar, then <b>Turn on calendar</b> to get your private link for Google, Apple or Outlook. It's one-way: changes made in your calendar app don't come back to Inspectit.app.</p>`}
+      <fieldset class="cal-sec">
+        <legend>What goes on your calendar</legend>
+        ${allowed.map(k => `<label class="cal-opt"><input type="checkbox" data-cal-cat="${k}"${p.categories[k] ? " checked" : ""}><span>${esc(CAL_CATS[k][0])}${CAL_CATS[k][1] ? `<small>${esc(CAL_CATS[k][1])}</small>` : ""}</span></label>`).join("")}
+        ${hidden.length ? `<p class="cal-note">Not included in your role: ${hidden.map(k => esc(CAL_CATS[k][0].toLowerCase())).join(", ")}.</p>` : ""}
+      </fieldset>
+      <fieldset class="cal-sec">
+        <legend>Event detail</legend>
+        <label class="cal-opt"><input type="radio" name="calDetail" value="basic"${p.detail !== "detailed" ? " checked" : ""}><span>Basic <small>e.g. “Vehicle maintenance due” — no names, plates or addresses</small></span></label>
+        <label class="cal-opt"><input type="radio" name="calDetail" value="detailed"${p.detail === "detailed" ? " checked" : ""}><span>Detailed <small>e.g. “TRK-1043 · 2021 Ford F-150 — Oil &amp; Filter Change”</small></span></label>
+        <p class="cal-note">Calendar events are stored by Google, Apple or Microsoft and can show on a lock screen or to anyone your calendar is shared with. Basic keeps details inside Inspectit.app.</p>
+      </fieldset>
+      <fieldset class="cal-sec">
+        <legend>Reminders</legend>
+        <label class="field" style="margin-bottom:8px;"><span>Alert</span>
+          <select id="calAlert">
+            <option value="7"${p.alert_days === 7 ? " selected" : ""}>1 week before (9 AM)</option>
+            <option value="1"${p.alert_days === 1 ? " selected" : ""}>1 day before (9 AM)</option>
+            <option value="0"${p.alert_days === 0 ? " selected" : ""}>Same day (9 AM)</option>
+            <option value="-1"${p.alert_days === -1 ? " selected" : ""}>No alert</option>
+          </select></label>
+        <label class="cal-opt"><input type="checkbox" id="calOverdue"${p.show_overdue ? " checked" : ""}><span>Show overdue items on today <small>An overdue item stays on today's date until it's done, instead of on a past date. (Warranties stay on their expiry date.)</small></span></label>
+      </fieldset>
+      <fieldset class="cal-sec">
+        <legend>Which ${showV ? "vehicles and properties" : "properties"}</legend>
+        <label class="cal-opt"><input type="radio" name="calFilter" value="all"${p.filter.mode !== "selected" ? " checked" : ""}><span>All of them</span></label>
+        <label class="cal-opt"><input type="radio" name="calFilter" value="selected"${p.filter.mode === "selected" ? " checked" : ""}><span>Only the ones I choose</span></label>
+        <div id="calPickWrap"${p.filter.mode === "selected" ? "" : " hidden"}>
+          ${showV ? `<div class="cal-note" style="margin-top:8px;"><b>Vehicles</b></div><div class="cal-pick">${pick(vehs, selV, "veh")}</div>` : ""}
+          <div class="cal-note" style="margin-top:8px;"><b>Properties</b> <span>(also covers their projects)</span></div><div class="cal-pick">${pick(props, selP, "prop")}</div>
+        </div>
+      </fieldset>
+      ${L ? `<fieldset class="cal-sec">
+        <legend>Link</legend>
+        <button class="ghost" id="calReset">Reset my calendar link</button>
+        <p class="cal-note">Makes a new link and stops the old one. You'll need to add the new link to your calendar app again.</p>
+      </fieldset>` : ""}
+      <p class="form-error" id="calErr" role="alert"></p>`;
+  const foot = !allowed.length ? `<button class="ghost" id="calX">Close</button>`
+    : `${L ? '<button class="danger" id="calOff">Turn off</button>' : ""}<button class="ghost" id="calX">Close</button><button class="primary" id="calSave">${L ? "Save changes" : "Turn on calendar"}</button>`;
+  const close = openModal("Calendar reminders", body, foot);
+  $("calX").onclick = close;
+  if (!allowed.length) return;
+  const c = cloudCfg();
+  const err = $("calErr");
+  const call = async (method, path, payload) => {
+    const r = await cloudFetch("/companies/" + c.company + "/calendar" + (path || ""), { method, body: payload });
+    if (!r.ok) throw new Error(await apiErrorText(r, "That didn't work"));
+    return r.json();
+  };
+  document.querySelectorAll('input[name="calFilter"]').forEach(el => el.onchange = () => { $("calPickWrap").hidden = el.value !== "selected" || !el.checked; });
+  const copy = $("calCopy");
+  if (copy) copy.onclick = async () => {
+    const inp = $("calUrl");
+    try { await navigator.clipboard.writeText(inp.value); toast("Calendar link copied."); }
+    catch (_) { inp.focus(); inp.select(); toast("Press Ctrl+C / ⌘C to copy the selected link."); }
+  };
+  $("calSave").onclick = async () => {
+    err.textContent = "";
+    const prefs = {
+      categories: {}, detail: (document.querySelector('input[name="calDetail"]:checked') || {}).value || "basic",
+      alert_days: Number($("calAlert").value), show_overdue: $("calOverdue").checked,
+      filter: { mode: (document.querySelector('input[name="calFilter"]:checked') || {}).value || "all",
+                vehicles: Array.from(document.querySelectorAll("[data-cal-veh]:checked")).map(x => x.dataset.calVeh),
+                properties: Array.from(document.querySelectorAll("[data-cal-prop]:checked")).map(x => x.dataset.calProp) },
+      tz: (Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC",
+    };
+    document.querySelectorAll("[data-cal-cat]").forEach(x => { prefs.categories[x.dataset.calCat] = x.checked; });
+    if (!Object.values(prefs.categories).some(Boolean)) { err.textContent = "Choose at least one thing to put on your calendar."; return; }
+    if (prefs.filter.mode === "selected" && !prefs.filter.vehicles.length && !prefs.filter.properties.length) { err.textContent = "Choose at least one vehicle or property, or pick “All of them”."; return; }
+    $("calSave").disabled = true;
+    try {
+      const next = await call("PUT", "", { prefs });
+      toast(L ? "Calendar settings saved." : "Calendar turned on — now add it to your calendar app.");
+      calRender(next, close);
+    } catch (e) { err.textContent = e.message; $("calSave").disabled = false; }
+  };
+  const rst = $("calReset");
+  if (rst) rst.onclick = async () => {
+    if (!confirm("Reset your calendar link? The old link stops working, and you'll need to add the new one to your calendar app again.")) return;
+    try { const next = await call("POST", "/reset"); toast("New calendar link created."); calRender(next, close); }
+    catch (e) { err.textContent = e.message; }
+  };
+  const off = $("calOff");
+  if (off) off.onclick = async () => {
+    if (!confirm("Turn off your calendar? Your link stops working. You can also remove the calendar from your calendar app.")) return;
+    try { await call("DELETE"); toast("Calendar turned off."); close(); }
+    catch (e) { err.textContent = e.message; }
+  };
+}
+$("btnCalendar").addEventListener("click", openCalendarSettings);
 
 /* ---------- cloud sync UI ---------- */
 $("btnCloud").addEventListener("click", () => {
@@ -2956,6 +3128,7 @@ function vehCard(v) {
           <dt>Make / Model</dt><dd>${esc(v.makeModel)}</dd>
         </dl>
         ${inspectionSummaryHtml(v.id)}
+        ${inspScheduleHtml("vehicle", v.id)}
         ${repairSummaryHtml(v.id)}
         ${vehSched.summaryHtml(v)}
         ${vehWarr.summaryHtml(v.id)}
@@ -3430,6 +3603,23 @@ function inRange(dateStr, range) {
   return true;
 }
 
+/* Repair ticket due date: the optional "Due by" date, else TICKET_OVERDUE_DAYS
+   after the ticket date. An open ticket past it is overdue (card/list badge and
+   the calendar feed). Mirrors ticket_due in api/calendar_feed.py. */
+const TICKET_OVERDUE_DAYS = 14;
+function ticketDue(t) {
+  if (pmParse(t.dueBy)) return t.dueBy;
+  const d = pmParse(t.date) || pmParse(String(t.createdAt || "").slice(0, 10));
+  if (!d) return null;
+  d.setDate(d.getDate() + TICKET_OVERDUE_DAYS);
+  return pmISO(d);
+}
+function ticketOverdue(t) {
+  const due = ticketDue(t);
+  return t.status !== "complete" && !!due && due < pmISO(new Date());
+}
+const ticketOverdueBadge = t => ticketOverdue(t) ? '<span class="st-badge mover">Overdue</span>' : "";
+
 function saveTicket(vehId, ticket) {
   const m = getTickets();
   const arr = (m[vehId] = m[vehId] || []);
@@ -3479,10 +3669,12 @@ function renderRepairList(root, v, tm) {
           <div class="rr-top">
             <button class="rep-id" data-open-ticket="${esc(t.id)}">${esc(t.id)}</button>
             <span class="st-badge ${t.status === "complete" ? "complete" : "pending"}">${t.status === "complete" ? "Complete" : "Pending"}</span>
+            ${ticketOverdueBadge(t)}
           </div>
           ${short ? `<div class="rr-desc">${esc(short)}</div>` : ""}
           <div class="rr-meta">
             <span>Date: <b>${esc(t.date || "—")}</b></span>
+            ${t.status !== "complete" && ticketDue(t) ? `<span>Due: <b>${esc(ticketDue(t))}</b>${t.dueBy ? "" : " (auto)"}</span>` : ""}
             ${t.odometer != null ? `<span>Odometer: <b>${esc(odoFmt(t.odometer))} mi</b></span>` : ""}
             ${t.status === "complete" && t.completedDate ? `<span>Completed: <b>${esc(t.completedDate)}</b></span>` : ""}
             ${t.vendor ? `<span>Vendor: <b>${esc(t.vendor)}</b></span>` : ""}
@@ -3571,6 +3763,8 @@ function renderRepairForm(root, v, tm) {
       <div class="grid2">
         <label class="field"><span>Ticket # / ID</span><input type="text" id="rtId" value="${esc(t.id)}"></label>
         <label class="field"><span class="req">Date of repair ticket</span><input type="date" id="rtDate" value="${esc(t.date || today)}"></label>
+        <label class="field"><span>Due by (optional)</span><input type="date" id="rtDueBy" value="${esc(t.dueBy || "")}" aria-describedby="rtDueHint">
+          <small id="rtDueHint" style="color:var(--muted);">Left blank, an open ticket is overdue ${TICKET_OVERDUE_DAYS} days after the ticket date.</small></label>
         <label class="field"><span>Person recommending repair</span><input type="text" id="rtPerson" value="${esc(t.person || "")}" placeholder="Name"></label>
         <label class="field"><span>Vendor</span><input type="text" id="rtVendor" value="${esc(t.vendor || "")}" placeholder="Repair shop / vendor"></label>
         <label class="field"><span>Status</span>
@@ -3660,6 +3854,7 @@ function renderRepairForm(root, v, tm) {
       id: ($("rtId").value.trim() || ticketId(v, date)),
       createdAt: t.createdAt || new Date().toISOString(),
       date: date,
+      dueBy: $("rtDueBy").value || "",
       person: $("rtPerson").value.trim(),
       vendor: $("rtVendor").value.trim(),
       status: status,
@@ -3762,6 +3957,7 @@ function repairSummaryHtml(id) {
       <span class="vr-label">Repairs</span>
       <button class="vr-id" data-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
+      ${(() => { const n = list.filter(ticketOverdue).length; return n ? `<span class="st-badge mover">${n} overdue</span>` : ""; })()}
       <span>${money(last.cost)}</span>
       <button class="vr-all" data-perm="vehicle_repairs:view" data-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
@@ -3817,6 +4013,97 @@ function propInspectionSummaryHtml(id) {
       <span class="vi-count">${list.length > 1 ? `${list.length} on record · ` : ""}History ›</span>
     </button>`;
 }
+
+/* ====================== INSPECTION SCHEDULES ======================
+   When the next inspection is due, by time and/or mileage, per vehicle or
+   property. Storage: K.vehicleInspSchedule / K.propertyInspSchedule =
+   { entityId: { freq, miles, start } }. Due date = last inspection date + freq
+   (never inspected: `start`, else today). Vehicles may add a mileage interval
+   counted from the last inspection's odometer and compared with the current
+   odometer (the maintenance scheduler's manual entry, else the latest
+   inspection). Mirrors insp_sched_status in api/calendar_feed.py. */
+const INSP_FREQS = ["none", "weekly", "monthly", "quarterly", "semiannual", "annual"];
+const INSP_KIND = {
+  vehicle:  { key: K.vehicleInspSchedule,  module: "vehicle_inspections",  word: "vehicle",  list: id => vehicleInspections(id), rerender: () => renderVehicles() },
+  property: { key: K.propertyInspSchedule, module: "property_inspections", word: "property", list: id => propInspections(id),   rerender: () => renderProperties() },
+};
+const inspSchedFor = (kind, id) => getJSON(INSP_KIND[kind].key, {})[id] || null;
+function inspCurrentOdo(id) {
+  const o = (getJSON(K.vehicleMaintenance, {})[id] || {}).__odo__;
+  if (o != null && o !== "") return Number(o);
+  const r = vehicleInspections(id).find(x => x.odometer != null);
+  return r ? Number(r.odometer) : null;
+}
+function inspSchedStatus(kind, id) {
+  const sc = inspSchedFor(kind, id);
+  if (!sc) return null;
+  const freq = INSP_FREQS.indexOf(sc.freq) > 0 ? sc.freq : null;
+  const miles = (kind === "vehicle" && Number(sc.miles) > 0) ? Number(sc.miles) : null;
+  if (!freq && miles == null) return null;
+  const last = INSP_KIND[kind].list(id)[0];
+  const lastDate = !last ? "" : pmParse(last.date) ? last.date
+    : (pmParse(String(last.savedAt || "").slice(0, 10)) ? String(last.savedAt).slice(0, 10) : "");
+  const today = pmISO(new Date());
+  const states = [];
+  let dateDue = null, milesDue = null;
+  if (freq) {
+    dateDue = lastDate ? pmAddInterval(lastDate, freq) : (pmParse(sc.start) ? sc.start : today);
+    states.push(dateDue < today ? "overdue" : pmDueSoonOrOk(dateDue, today).state);
+  }
+  if (miles != null) {
+    const lo = (last && last.odometer != null && last.odometer !== "") ? Number(last.odometer) : null;
+    if (lo != null && !isNaN(lo)) {
+      milesDue = lo + miles;
+      const cur = inspCurrentOdo(id);
+      states.push(cur != null && cur >= milesDue ? "overdue" : (cur != null && milesDue - cur <= VEH_SOON_MILES ? "soon" : "ok"));
+    }
+  }
+  if (!states.length) return null;
+  const state = states.includes("overdue") ? "overdue" : states.includes("soon") ? "soon" : "ok";
+  return { state, dateDue, milesDue };
+}
+function inspScheduleHtml(kind, id) {
+  const sc = inspSchedFor(kind, id);
+  const st = inspSchedStatus(kind, id);
+  const btn = `<button class="vw-all" data-perm="${INSP_KIND[kind].module}:edit" data-insp-sched="${kind}|${esc(id)}">${sc ? "Edit schedule" : "Set schedule"} ›</button>`;
+  if (!st) return `<div class="veh-warr none"><span class="vw-label">Next inspection</span><span>Not scheduled</span>${btn}</div>`;
+  const badge = st.state === "overdue" ? '<span class="st-badge mover">Overdue</span>'
+    : st.state === "soon" ? '<span class="st-badge msoon">Due soon</span>' : '<span class="st-badge mok">Scheduled</span>';
+  const when = [st.dateDue ? esc(st.dateDue) : "", st.milesDue != null ? milesFmt(st.milesDue) + " mi" : ""].filter(Boolean).join(" / ");
+  return `<div class="veh-warr"><span class="vw-label">Next inspection</span><span>${when || "—"}</span>${badge}${btn}</div>`;
+}
+function openInspSchedule(kind, id) {
+  const K_ = INSP_KIND[kind];
+  if (!can(K_.module, "edit")) return;
+  const sc = inspSchedFor(kind, id) || {};
+  const isVeh = kind === "vehicle";
+  const close = openModal("Inspection schedule", `
+      <p class="hint" style="margin-top:0;">How often should this ${K_.word} be inspected? The next due date counts from the last completed inspection${isVeh ? ", and a mileage interval from that inspection's odometer" : ""}. Use a time interval, ${isVeh ? "a mileage interval, or both (whichever comes first)" : "for example every quarter"}.</p>
+      <label class="field"><span>Every</span>
+        <select id="isFreq">${INSP_FREQS.map(f => `<option value="${f}"${f === (sc.freq || "none") ? " selected" : ""}>${f === "none" ? "No time interval" : FREQ_LABEL[f]}</option>`).join("")}</select></label>
+      ${isVeh ? `<label class="field"><span>Every (miles)</span><input type="text" id="isMiles" inputmode="numeric" autocomplete="off" value="${Number(sc.miles) > 0 ? esc(milesFmt(sc.miles)) : ""}" placeholder="e.g. 5,000"></label>` : ""}
+      <label class="field"><span>First inspection due (used until one is on record)</span><input type="date" id="isStart" value="${esc(sc.start || "")}"></label>
+      <p class="form-error" id="isErr" role="alert"></p>`,
+    `${(sc.freq || sc.miles) ? '<button class="danger" id="isClear">Remove schedule</button>' : ""}<button class="ghost" id="isCancel">Cancel</button><button class="primary" id="isSave">Save schedule</button>`);
+  const write = fn => { const all = getJSON(K_.key, {}); fn(all); setJSON(K_.key, all); close(); K_.rerender(); };
+  $("isCancel").onclick = close;
+  const clr = $("isClear");
+  if (clr) clr.onclick = () => write(all => { delete all[id]; });
+  $("isSave").onclick = () => {
+    const freq = $("isFreq").value;
+    const miles = isVeh ? milesParse($("isMiles").value) : null;
+    if (freq === "none" && !(miles > 0)) { $("isErr").textContent = isVeh ? "Choose a time interval, a mileage interval, or both." : "Choose how often to inspect."; return; }
+    write(all => { all[id] = { freq, miles: miles > 0 ? miles : null, start: $("isStart").value || "" }; });
+    toast("Inspection schedule saved.");
+  };
+  setTimeout(() => $("isFreq").focus(), 50);
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest && e.target.closest("[data-insp-sched]");
+  if (!b) return;
+  const i = b.dataset.inspSched.indexOf("|");
+  openInspSchedule(b.dataset.inspSched.slice(0, i), b.dataset.inspSched.slice(i + 1));
+});
 
 /* ----- list ----- */
 function renderPropList(root) {
@@ -3888,6 +4175,7 @@ function propCard(p) {
           <dt>City / State / Zip</dt><dd>${esc(cityStateZip(p) || "—")}</dd>
         </dl>
         ${propInspectionSummaryHtml(p.id)}
+        ${inspScheduleHtml("property", p.id)}
         ${propRepairSummaryHtml(p.id)}
         ${propSched.summaryHtml(p)}
         ${propWarr.summaryHtml(p.id)}
@@ -4282,6 +4570,7 @@ function propRepairSummaryHtml(id) {
       <span class="vr-label">Repairs</span>
       <button class="vr-id" data-prop-rep-ticket="${id}|${esc(last.id)}" title="Open ${esc(last.id)}">${esc(last.id)}</button>
       <span class="st-badge ${last.status === "complete" ? "complete" : "pending"}">${last.status === "complete" ? "Complete" : "Pending"}</span>
+      ${(() => { const n = list.filter(ticketOverdue).length; return n ? `<span class="st-badge mover">${n} overdue</span>` : ""; })()}
       <span>${money(last.cost)}</span>
       <button class="vr-all" data-perm="property_repairs:view" data-prop-rep-list="${id}">${list.length} · ${money(total)} total ›</button>
     </div>`;
@@ -4306,10 +4595,12 @@ function renderPropRepairList(root, p, tm) {
           <div class="rr-top">
             <button class="rep-id" data-open-ticket="${esc(t.id)}">${esc(t.id)}</button>
             <span class="st-badge ${t.status === "complete" ? "complete" : "pending"}">${t.status === "complete" ? "Complete" : "Pending"}</span>
+            ${ticketOverdueBadge(t)}
           </div>
           ${short ? `<div class="rr-desc">${esc(short)}</div>` : ""}
           <div class="rr-meta">
             <span>Date: <b>${esc(t.date || "—")}</b></span>
+            ${t.status !== "complete" && ticketDue(t) ? `<span>Due: <b>${esc(ticketDue(t))}</b>${t.dueBy ? "" : " (auto)"}</span>` : ""}
             ${t.status === "complete" && t.completedDate ? `<span>Completed: <b>${esc(t.completedDate)}</b></span>` : ""}
             ${t.vendor ? `<span>Vendor: <b>${esc(t.vendor)}</b></span>` : ""}
             ${(t.attachments && t.attachments.length) ? `<span><b>${t.attachments.length}</b> file${t.attachments.length === 1 ? "" : "s"}</span>` : ""}
@@ -4392,6 +4683,8 @@ function renderPropRepairForm(root, p, tm) {
       <div class="grid2">
         <label class="field"><span>Ticket # / ID</span><input type="text" id="rtId" value="${esc(t.id)}"></label>
         <label class="field"><span class="req">Date of repair ticket</span><input type="date" id="rtDate" value="${esc(t.date || today)}"></label>
+        <label class="field"><span>Due by (optional)</span><input type="date" id="rtDueBy" value="${esc(t.dueBy || "")}" aria-describedby="rtDueHint">
+          <small id="rtDueHint" style="color:var(--muted);">Left blank, an open ticket is overdue ${TICKET_OVERDUE_DAYS} days after the ticket date.</small></label>
         <label class="field"><span>Person recommending repair</span><input type="text" id="rtPerson" value="${esc(t.person || "")}" placeholder="Name"></label>
         <label class="field"><span>Vendor</span><input type="text" id="rtVendor" value="${esc(t.vendor || "")}" placeholder="Repair shop / vendor"></label>
         <label class="field"><span>Status</span>
@@ -4474,6 +4767,7 @@ function renderPropRepairForm(root, p, tm) {
       id: ($("rtId").value.trim() || propTicketId(p, date)),
       createdAt: t.createdAt || new Date().toISOString(),
       date: date,
+      dueBy: $("rtDueBy").value || "",
       person: $("rtPerson").value.trim(),
       vendor: $("rtVendor").value.trim(),
       status: status,
@@ -4715,6 +5009,19 @@ function makeScheduler(cfg) {
   }
   const getTemplates = () => getJSON(cfg.tmplKey, {});
   const setTemplates = o => setJSON(cfg.tmplKey, o);
+  /* Which schedule an entity follows is saved per entity under the reserved
+     "__tmpl__" key (a saved template's name; absent = built-in), so it survives
+     a reload and the server-side calendar feed reads the same schedule. */
+  const tmplKeyFor = id => { const n = maintFor(id).__tmpl__; return (n && getTemplates()[n]) ? n : cfg.defaultKey; };
+  function templateFor(id) {
+    const k = tmplKeyFor(id);
+    return k === cfg.defaultKey ? cfg.builtin : getTemplates()[k];
+  }
+  function rememberTemplate(id, key) {
+    if (!id || !can(cfg.module, "edit")) return;
+    const want = key === cfg.defaultKey ? "" : key;
+    if ((maintFor(id).__tmpl__ || "") !== want) setItem(id, "__tmpl__", want);
+  }
 
   function loadTemplate(key) {
     S.selected = key;
@@ -4731,6 +5038,7 @@ function makeScheduler(cfg) {
     saved[name] = clonePM({ name, categories: S.template.categories });
     setTemplates(saved);
     S.selected = name;
+    rememberTemplate(S.entityId, name);
     S.view = "view";
     toast(`Schedule "${name}" saved.`);
     cfg.rerender();
@@ -4740,6 +5048,7 @@ function makeScheduler(cfg) {
     if (!confirm(`Delete the saved schedule "${S.selected}"?`)) return;
     const saved = getTemplates(); delete saved[S.selected]; setTemplates(saved);
     loadTemplate(cfg.defaultKey);
+    rememberTemplate(S.entityId, cfg.defaultKey);
     cfg.rerender();
   }
 
@@ -4752,7 +5061,7 @@ function makeScheduler(cfg) {
     const stateMap = maintFor(id);
     const ctx = AD.ctx(entity, stateMap);
     let overdue = 0, soon = 0, ok = 0, total = 0;
-    S.template.categories.forEach(cat => cat.items.forEach(it => {
+    templateFor(id).categories.forEach(cat => cat.items.forEach(it => {
       total++;
       const st = AD.status(it, stateMap[pmKey(cat, it)] || "", ctx).state;
       if (st === "overdue") overdue++;
@@ -4775,6 +5084,8 @@ function makeScheduler(cfg) {
     const rerender = cfg.rerender;
     const id = cfg.idOf(entity);
     const editing = S.view === "edit";
+    if (!editing && S.entityId !== id) loadTemplate(tmplKeyFor(id));   // open this entity's own schedule
+    S.entityId = id;
     const saved = getTemplates();
     const stateMap = maintFor(id);
     const ctx = AD.ctx(entity, stateMap);
@@ -4866,7 +5177,7 @@ function makeScheduler(cfg) {
     root.querySelector("#ptoolBack").onclick = cfg.backFn;
     const tplSel = root.querySelector("#pmTemplate");
     tplSel.value = S.selected;
-    tplSel.onchange = e => { loadTemplate(e.target.value); rerender(); };
+    tplSel.onchange = e => { loadTemplate(e.target.value); rememberTemplate(id, e.target.value); rerender(); };
     root.querySelector("#pmEdit").onclick = () => { S.view = editing ? "view" : "edit"; rerender(); };
     root.querySelector("#pmSave").onclick = saveTemplate;
     const del = root.querySelector("#pmDelete"); if (del) del.onclick = deleteTemplate;

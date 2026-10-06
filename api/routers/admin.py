@@ -5,11 +5,13 @@ company administrators (they use /companies/{id}/...). Every route requires
 users.is_platform_admin (see permissions.platform_admin).
 
     GET   /admin/stats                    usage overview
+    GET   /admin/demo-requests            "Schedule a Demo" requests (?status=)
+    PATCH /admin/demo-requests/{id}       mark new / contacted / closed
     GET   /admin/companies                companies + member counts
     GET   /admin/users?q=&limit=&offset=  users + memberships (search by email/name)
     POST  /admin/users                    create user (+ membership, optional new company)
     PATCH /admin/users/{id}               name / disable / platform-admin flag
-    POST  /admin/users/{id}/reset-password   set (or generate) a new password
+    POST  /admin/users/{id}/reset-password   set (or generate) a new password, or email a link
 
 Bootstrapping: PLATFORM_ADMIN_EMAILS env var -> promote_platform_admins()
 runs at startup. The frontend is web/admin.html.
@@ -22,9 +24,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from .. import config, security
+from .. import config, mailer, security
+from .auth import issue_password_token
 from ..db import audit, get_pool
 from ..permissions import platform_admin
+from ..trial import access_state, timeline
 
 router = APIRouter(prefix="/admin", tags=["admin"],
                    dependencies=[Depends(platform_admin)])
@@ -120,8 +124,21 @@ def stats():
               (SELECT COALESCE(sum(size_bytes), 0) FROM files
                  WHERE deleted_at IS NULL)                                  AS file_bytes,
               (SELECT count(*) FROM refresh_tokens
-                 WHERE revoked_at IS NULL AND expires_at > now())           AS live_sessions
-        """)
+                 WHERE revoked_at IS NULL AND expires_at > now())           AS live_sessions,
+              (SELECT count(*) FROM demo_requests WHERE status = 'new')     AS demo_requests_new,
+              (SELECT count(*) FROM companies
+                 WHERE deleted_at IS NULL AND subscribed_at IS NULL AND NOT complimentary
+                   AND trial_ends_at > now())                               AS trials_active,
+              (SELECT count(*) FROM companies
+                 WHERE deleted_at IS NULL AND subscribed_at IS NULL AND NOT complimentary
+                   AND trial_ends_at <= now()
+                   AND trial_ends_at + make_interval(days => %s) > now())   AS trials_grace,
+              (SELECT count(*) FROM companies
+                 WHERE deleted_at IS NULL AND subscribed_at IS NULL AND NOT complimentary
+                   AND trial_ends_at + make_interval(days => %s) <= now())  AS trials_suspended,
+              (SELECT count(*) FROM companies
+                 WHERE deleted_at IS NULL AND complimentary)                AS complimentary
+        """, config.TRIAL_GRACE_DAYS, config.TRIAL_GRACE_DAYS)
         activity = one("""
             SELECT
               (SELECT count(*) FROM users WHERE created_at > now() - interval '7 days')   AS signups_7d,
@@ -175,14 +192,94 @@ def list_companies(q: Optional[str] = None,
                    offset: int = Query(0, ge=0)):
     with get_pool().connection() as conn:
         rows = conn.execute("""
-            SELECT c.id, c.name, c.created_at,
+            SELECT c.id, c.name, c.created_at, c.trial_ends_at, c.subscribed_at, c.complimentary,
                    count(m.id) FILTER (WHERE m.deleted_at IS NULL AND m.status = 'active') AS members
             FROM companies c
             LEFT JOIN memberships m ON m.company_id = c.id
             WHERE c.deleted_at IS NULL AND c.name ILIKE %s
             GROUP BY c.id ORDER BY c.name LIMIT %s OFFSET %s
         """, (f"%{q}%" if q else "%", limit, offset)).fetchall()
-    return [{**r, "id": str(r["id"])} for r in rows]
+    return [{**r, "id": str(r["id"]),
+             "access": access_state(r["trial_ends_at"], r["subscribed_at"],
+                                    complimentary=r["complimentary"]),
+             "grace_ends_at": (timeline(r["trial_ends_at"])["grace_ends_at"]
+                               if r["trial_ends_at"] else None)}
+            for r in rows]
+
+
+class SubscriptionIn(BaseModel):
+    active: bool
+
+
+@router.patch("/companies/{company_id}/subscription")
+def set_subscription(company_id: str, body: SubscriptionIn,
+                     admin: dict = Depends(platform_admin)):
+    """Mark a company subscribed (lifts any suspension) or remove it. Stands in
+    for a payment webhook until billing exists."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE companies
+               SET subscribed_at = CASE WHEN %s THEN COALESCE(subscribed_at, now()) ELSE NULL END
+               WHERE id = %s AND deleted_at IS NULL
+               RETURNING id, trial_ends_at, subscribed_at, complimentary""",
+            (body.active, cid)).fetchone()
+        if not row:
+            raise HTTPException(404, "Company not found")
+        audit(conn, cid, admin["id"], "update", "company", cid,
+              {"event": "subscription_" + ("on" if body.active else "off")})
+    return {"id": str(cid), "subscribed": row["subscribed_at"] is not None,
+            "access": access_state(row["trial_ends_at"], row["subscribed_at"],
+                                   complimentary=row["complimentary"])}
+
+
+@router.patch("/companies/{company_id}/complimentary")
+def set_complimentary(company_id: str, body: SubscriptionIn,
+                      admin: dict = Depends(platform_admin)):
+    """Mark a company complimentary (test/comped: no trial, no paywall) or not.
+    Turning it off puts a company with a trial date back on that clock."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE companies SET complimentary = %s
+               WHERE id = %s AND deleted_at IS NULL
+               RETURNING id, trial_ends_at, subscribed_at, complimentary""",
+            (body.active, cid)).fetchone()
+        if not row:
+            raise HTTPException(404, "Company not found")
+        audit(conn, cid, admin["id"], "update", "company", cid,
+              {"event": "complimentary_" + ("on" if body.active else "off")})
+    return {"id": str(cid), "complimentary": row["complimentary"],
+            "access": access_state(row["trial_ends_at"], row["subscribed_at"],
+                                   complimentary=row["complimentary"])}
+
+
+class ExtendTrialIn(BaseModel):
+    days: int = Field(ge=1, le=365)
+
+
+@router.post("/companies/{company_id}/extend-trial")
+def extend_trial(company_id: str, body: ExtendTrialIn,
+                 admin: dict = Depends(platform_admin)):
+    """Push the trial end out by N days (from now if it already ended). Resets
+    the reminder/ended emails so they fire again for the new date."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE companies
+               SET trial_ends_at = GREATEST(COALESCE(trial_ends_at, now()), now())
+                                   + make_interval(days => %s),
+                   trial_reminder_sent_at = NULL, trial_ended_notice_sent_at = NULL,
+                   suspended_notice_sent_at = NULL, deletion_warning_sent_at = NULL
+               WHERE id = %s AND deleted_at IS NULL
+               RETURNING id, trial_ends_at, subscribed_at""",
+            (body.days, cid)).fetchone()
+        if not row:
+            raise HTTPException(404, "Company not found")
+        audit(conn, cid, admin["id"], "update", "company", cid,
+              {"event": "trial_extended", "days": body.days})
+    return {"id": str(cid), "trial_ends_at": row["trial_ends_at"],
+            "access": access_state(row["trial_ends_at"], row["subscribed_at"])}
 
 
 # ---------- users ----------
@@ -222,6 +319,12 @@ class CreateUserIn(BaseModel):
     company_name: Optional[str] = Field(default=None, max_length=200)
     role: str = DEFAULT_ROLE          # preset role name for the membership
     is_platform_admin: bool = False
+    # Test/comped account: no trial, no paywall. Only with company_name (a NEW
+    # company); flip an existing company on the Companies tab instead.
+    complimentary: bool = False
+    # Email the person a link to choose their own password instead of handing
+    # them one. A random password is set that nobody ever sees.
+    send_setup_email: bool = False
 
 
 @router.post("/users", status_code=201)
@@ -229,6 +332,11 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
     email = _normalize_email(body.email)
     if body.company_id and body.company_name:
         raise HTTPException(422, "Give company_id OR company_name, not both")
+    if body.complimentary and not (body.company_name and body.company_name.strip()):
+        raise HTTPException(422, "complimentary applies to a new company: give "
+                                 "company_name, or use the Companies tab for an existing one")
+    if body.send_setup_email and body.password:
+        raise HTTPException(422, "Give a password OR ask for the setup email, not both")
     password = body.password or _generate_password()
     with get_pool().connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
@@ -243,8 +351,8 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
         company_id = None
         if body.company_name and body.company_name.strip():
             company_id = conn.execute(
-                "INSERT INTO companies (name) VALUES (%s) RETURNING id",
-                (body.company_name.strip(),)).fetchone()["id"]
+                "INSERT INTO companies (name, complimentary) VALUES (%s, %s) RETURNING id",
+                (body.company_name.strip(), body.complimentary)).fetchone()["id"]
         elif body.company_id:
             cid = _uuid(body.company_id, "Company")
             if not conn.execute(
@@ -272,6 +380,22 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
                   membership["id"], {"event": "admin_create_user",
                                      "user_id": str(user["id"]), "role": body.role})
         out = _user_out(_fetch_user(conn, user["id"]))
+        setup_link = None
+        if body.send_setup_email:
+            token = issue_password_token(conn, user["id"], config.ADMIN_LINK_TTL_MIN, "welcome")
+            setup_link = f"{config.APP_BASE_URL}/reset-password?token={token}&welcome=1"
+            company_label = (conn.execute("SELECT name FROM companies WHERE id = %s",
+                                          (company_id,)).fetchone()["name"]
+                             if company_id else None)
+    if body.send_setup_email:
+        subject, text = mailer.welcome_email(body.name, company_label,
+                                             body.role if company_id else None,
+                                             setup_link, config.ADMIN_LINK_TTL_MIN)
+        sent = mailer.send_mail(subject, text, None, email)     # sync: the admin is waiting
+        out["setup_email_sent"] = bool(sent)
+        if not sent:                                            # fall back: hand over the link
+            out["setup_link"] = setup_link
+        return out
     # The password is shown ONCE so the operator can hand it to the person.
     out["password"] = password
     out["password_generated"] = body.password is None
@@ -311,16 +435,45 @@ def update_user(user_id: str, body: UpdateUserIn, admin: dict = Depends(platform
 
 
 class ResetPasswordIn(BaseModel):
+    # Email the person a reset link instead of setting a password here.
+    send_email: bool = False
     password: Optional[str] = Field(default=None, min_length=PASSWORD_MIN, max_length=200)
 
 
 @router.post("/users/{user_id}/reset-password")
 def reset_password(user_id: str, body: ResetPasswordIn = None,
                    admin: dict = Depends(platform_admin)):
-    """Set a new password for the user (generated if not supplied) and sign
-    them out everywhere. The new password is returned ONCE for the operator
-    to pass on — this stands in for emailed reset links until a mailer exists."""
+    """Two ways to help someone who is locked out:
+      * send_email=true: email them a one-time link to choose a new password
+        (nothing changes until they use it; falls back to returning the link if
+        the email cannot be sent);
+      * default: set a new password here (generated if not supplied), sign them
+        out everywhere, and return it ONCE for the operator to pass on."""
     uid = _uuid(user_id, "User")
+    if body and body.send_email:
+        if body.password:
+            raise HTTPException(422, "Give a password OR send_email, not both")
+        with get_pool().connection() as conn:
+            u = conn.execute("SELECT email, name, disabled_at FROM users WHERE id = %s",
+                             (uid,)).fetchone()
+            if not u:
+                raise HTTPException(404, "User not found")
+            if u["disabled_at"]:
+                raise HTTPException(409, "This account is disabled. Enable it first.")
+            token = issue_password_token(conn, uid, config.ADMIN_LINK_TTL_MIN, "reset")
+            for m in conn.execute(
+                    "SELECT company_id FROM memberships WHERE user_id = %s AND deleted_at IS NULL",
+                    (uid,)).fetchall():
+                audit(conn, m["company_id"], admin["id"], "update", "user", uid,
+                      {"event": "admin_reset_link_emailed"})
+        link = f"{config.APP_BASE_URL}/reset-password?token={token}"
+        subject, text = mailer.password_reset_email(u["name"], link, config.ADMIN_LINK_TTL_MIN)
+        sent = mailer.send_mail(subject, text, None, u["email"])
+        out = {"ok": True, "user_id": str(uid), "email": u["email"],
+               "setup_email_sent": bool(sent)}
+        if not sent:
+            out["setup_link"] = link
+        return out
     password = (body.password if body and body.password else None) or _generate_password()
     with get_pool().connection() as conn:
         row = conn.execute(
@@ -341,3 +494,44 @@ def reset_password(user_id: str, body: ResetPasswordIn = None,
     return {"ok": True, "user_id": str(uid), "email": row["email"],
             "password": password,
             "password_generated": not (body and body.password)}
+
+
+# ---------- demo requests (marketing site) ----------
+
+class DemoStatusIn(BaseModel):
+    status: str = Field(pattern="^(new|contacted|closed)$")
+
+
+@router.get("/demo-requests")
+def list_demo_requests(response: Response,
+                       status: Optional[str] = Query(None, pattern="^(new|contacted|closed)$"),
+                       limit: int = Query(100, ge=1, le=500),
+                       offset: int = Query(0, ge=0)):
+    where = " WHERE status = %s" if status else ""
+    wargs: list = [status] if status else []
+    with get_pool().connection() as conn:
+        total = conn.execute("SELECT count(*) AS n FROM demo_requests" + where,
+                             wargs).fetchone()["n"]
+        rows = conn.execute(
+            """SELECT id, name, email, asset_count, status, created_at, handled_at
+               FROM demo_requests""" + where
+            + " ORDER BY created_at DESC LIMIT %s OFFSET %s",
+            wargs + [limit, offset]).fetchall()
+    response.headers["X-Total-Count"] = str(total)
+    return [{**r, "id": str(r["id"])} for r in rows]
+
+
+@router.patch("/demo-requests/{request_id}")
+def update_demo_request(request_id: str, body: DemoStatusIn):
+    rid = _uuid(request_id, "Demo request")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE demo_requests
+               SET status = %s,
+                   handled_at = CASE WHEN %s = 'new' THEN NULL ELSE now() END
+               WHERE id = %s
+               RETURNING id, name, email, asset_count, status, created_at, handled_at""",
+            (body.status, body.status, rid)).fetchone()
+    if not row:
+        raise HTTPException(404, "Demo request not found")
+    return {**row, "id": str(row["id"])}
