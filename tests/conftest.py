@@ -33,6 +33,8 @@ os.environ["STORAGE_DIR"] = str(_store)
 # The suite makes many auth calls from one client; the per-IP limiter is
 # exercised explicitly in test_zz_hardening.py with a tightened budget.
 os.environ["AUTH_RATE_LIMIT"] = "1000"
+# The trial loop is exercised by calling run_trial_cycle() directly in tests.
+os.environ["TRIAL_CHECK_INTERVAL_S"] = "0"
 
 
 @pytest.fixture(scope="session")

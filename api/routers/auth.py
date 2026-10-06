@@ -1,12 +1,13 @@
 """Auth: signup (creates a company + admin), login, refresh, password reset,
 and invitation acceptance."""
 import datetime as dt
-from typing import Optional
+from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
+from psycopg.types.json import Jsonb
 
-from .. import config, security
+from .. import config, mailer, security
 from ..db import audit, cleanup_user_tokens, get_pool
 from ..presets import BLOCKED_COMBINATIONS
 from ..ratelimit import rate_limit_auth
@@ -25,6 +26,16 @@ class SignupIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     email: str = Field(min_length=EMAIL_MIN, max_length=320)
     password: str = Field(min_length=PASSWORD_MIN, max_length=200)
+
+
+class TrialSignupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=EMAIL_MIN, max_length=320)
+    password: str = Field(min_length=PASSWORD_MIN, max_length=200)
+    track: Optional[Literal["vehicles", "properties", "both"]] = None
+    who: Optional[Literal["me", "org"]] = None
+    org: Optional[str] = Field(default=None, max_length=200)
+    size: Optional[Literal["1-5", "6-25", "26-100", "100+"]] = None
 
 
 class LoginIn(BaseModel):
@@ -66,40 +77,87 @@ def _token_pair(conn, user_id) -> dict:
     }
 
 
+def _create_account(conn, *, company_name, name, email, password,
+                    trial_days=None, signup_info=None) -> dict:
+    """Create user + company + Company Administrator membership. Shared by
+    /auth/signup and /auth/trial-signup. Raises 409 if the email is taken."""
+    if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
+        raise HTTPException(409, "An account with this email already exists")
+    user = conn.execute(
+        """INSERT INTO users (email, password_hash, name)
+           VALUES (%s, %s, %s) RETURNING id""",
+        (email, security.hash_password(password), name.strip()),
+    ).fetchone()
+    trial_ends = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=trial_days)
+                  if trial_days else None)
+    company = conn.execute(
+        """INSERT INTO companies (name, trial_ends_at, signup_info)
+           VALUES (%s, %s, %s) RETURNING id""",
+        (company_name.strip(), trial_ends,
+         Jsonb(signup_info) if signup_info else None),
+    ).fetchone()
+    membership = conn.execute(
+        """INSERT INTO memberships (company_id, user_id)
+           VALUES (%s, %s) RETURNING id""",
+        (company["id"], user["id"]),
+    ).fetchone()
+    admin_role = conn.execute(
+        """SELECT id FROM roles
+           WHERE company_id IS NULL AND name = 'Company Administrator'""",
+    ).fetchone()
+    conn.execute(
+        "INSERT INTO membership_roles (membership_id, role_id) VALUES (%s, %s)",
+        (membership["id"], admin_role["id"]),
+    )
+    event = {"event": "trial_signup" if trial_days else "signup"}
+    if signup_info:
+        event["info"] = signup_info
+    audit(conn, company["id"], user["id"], "create", "company", company["id"],
+          event)
+    out = {"company_id": str(company["id"]), "user_id": str(user["id"]),
+           **_token_pair(conn, user["id"])}
+    if trial_ends:
+        out["trial_ends_at"] = trial_ends.isoformat()
+    return out
+
+
 @router.post("/signup")
 def signup(body: SignupIn):
     """Self-serve: creates the user, their company, and grants the
     Company Administrator preset role."""
     email = _normalize_email(body.email)
     with get_pool().connection() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
-            raise HTTPException(409, "An account with this email already exists")
-        user = conn.execute(
-            """INSERT INTO users (email, password_hash, name)
-               VALUES (%s, %s, %s) RETURNING id""",
-            (email, security.hash_password(body.password), body.name.strip()),
-        ).fetchone()
-        company = conn.execute(
-            "INSERT INTO companies (name) VALUES (%s) RETURNING id",
-            (body.company_name.strip(),),
-        ).fetchone()
-        membership = conn.execute(
-            """INSERT INTO memberships (company_id, user_id)
-               VALUES (%s, %s) RETURNING id""",
-            (company["id"], user["id"]),
-        ).fetchone()
-        admin_role = conn.execute(
-            """SELECT id FROM roles
-               WHERE company_id IS NULL AND name = 'Company Administrator'""",
-        ).fetchone()
-        conn.execute(
-            "INSERT INTO membership_roles (membership_id, role_id) VALUES (%s, %s)",
-            (membership["id"], admin_role["id"]),
-        )
-        audit(conn, company["id"], user["id"], "create", "company", company["id"],
-              {"event": "signup"})
-        return {"company_id": str(company["id"]), "user_id": str(user["id"]),
-                **_token_pair(conn, user["id"])}
+        return _create_account(conn, company_name=body.company_name,
+                               name=body.name, email=email,
+                               password=body.password)
+
+
+@router.post("/trial-signup")
+def trial_signup(body: TrialSignupIn, background: BackgroundTasks):
+    """Website free-trial form. Same account shape as /auth/signup, plus a
+    30-day trial end date and the form's optional answers. Individuals have no
+    company name, so they get '<Name>'s account'."""
+    email = _normalize_email(body.email)
+    org = (body.org or "").strip()
+    name = body.name.strip()
+    company_name = org if (body.who == "org" and org) else f"{name}'s account"
+    info = {k: v for k, v in {"track": body.track, "who": body.who,
+                              "size": body.size}.items() if v}
+    with get_pool().connection() as conn:
+        try:
+            out = _create_account(conn, company_name=company_name, name=name,
+                                  email=email, password=body.password,
+                                  trial_days=config.TRIAL_DAYS,
+                                  signup_info=info or None)
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                raise HTTPException(
+                    409, "That email already has an account. Sign in instead?")
+            raise
+    subject, text = mailer.trial_signup_email(name, email, company_name, info,
+                                              out["trial_ends_at"][:10])
+    background.add_task(mailer.send_mail, subject, text, email)
+    return out
 
 
 @router.post("/login")
@@ -129,17 +187,32 @@ def refresh(body: RefreshIn):
                 "token_type": "bearer"}
 
 
+def issue_password_token(conn, user_id, minutes: int, purpose: str = "reset") -> str:
+    """Create a single-use set-password token; returns the raw token (only its
+    hash is stored). Used by /forgot and by the admin portal's emailed links."""
+    token = security.new_url_token()
+    conn.execute(
+        """INSERT INTO password_resets (token_hash, user_id, expires_at, purpose)
+           VALUES (%s, %s, %s, %s)""",
+        (security.sha256(token), user_id,
+         dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=minutes), purpose))
+    return token
+
+
 @router.post("/forgot")
-def forgot(body: ForgotIn):
-    """Always returns 200 (no account-existence oracle). In DEV_MODE the reset
-    token is returned directly; production will email it instead."""
+def forgot(body: ForgotIn, background: BackgroundTasks):
+    """Always returns 200 (no account-existence oracle). The reset link is
+    emailed to the account's address in a background task; in DEV_MODE the
+    token is also returned directly so tests and local work need no mailbox."""
     try:
         email = _normalize_email(body.email)
     except HTTPException:
         return {"ok": True}
     with get_pool().connection() as conn:
-        user = conn.execute("SELECT id FROM users WHERE email = %s", (email,)).fetchone()
-        if not user:
+        user = conn.execute(
+            "SELECT id, name, disabled_at FROM users WHERE email = %s",
+            (email,)).fetchone()
+        if not user or user.get("disabled_at"):
             return {"ok": True}
         token = security.new_url_token()
         conn.execute(
@@ -149,6 +222,10 @@ def forgot(body: ForgotIn):
              dt.datetime.now(dt.timezone.utc)
              + dt.timedelta(minutes=config.RESET_TOKEN_TTL_MIN)),
         )
+    link = f"{config.APP_BASE_URL}/reset-password?token={token}"
+    subject, text = mailer.password_reset_email(user["name"], link,
+                                                config.RESET_TOKEN_TTL_MIN)
+    background.add_task(mailer.send_mail, subject, text, None, email)
     out = {"ok": True}
     if config.DEV_MODE:
         out["dev_reset_token"] = token
@@ -156,12 +233,12 @@ def forgot(body: ForgotIn):
 
 
 @router.post("/reset")
-def reset(body: ResetIn):
+def reset(body: ResetIn, background: BackgroundTasks):
     with get_pool().connection() as conn:
         row = conn.execute(
             """UPDATE password_resets SET used_at = now()
                WHERE token_hash = %s AND used_at IS NULL AND expires_at > now()
-               RETURNING user_id""",
+               RETURNING user_id, purpose""",
             (security.sha256(body.token),),
         ).fetchone()
         if not row:
@@ -173,6 +250,12 @@ def reset(body: ResetIn):
             """UPDATE refresh_tokens SET revoked_at = now()
                WHERE user_id = %s AND revoked_at IS NULL""",
             (row["user_id"],))
+        user = conn.execute("SELECT email, name FROM users WHERE id = %s",
+                            (row["user_id"],)).fetchone()
+    if user and row["purpose"] != "welcome":
+        subject, text = mailer.password_changed_email(
+            user["name"], f"{config.APP_BASE_URL}/web/inspectit-app.html")
+        background.add_task(mailer.send_mail, subject, text, None, user["email"])
     return {"ok": True}
 
 

@@ -163,11 +163,53 @@ inspectit-v2/
    returns token pair
 3. **Refresh** (`POST /auth/refresh`) — rotates the refresh token (old one is
    invalidated); returns a new token pair
-4. **Password reset** — `POST /auth/forgot` creates a reset token (returned in
-   dev mode, emailed in prod); `POST /auth/reset` consumes it
+4. **Password reset** — `POST /auth/forgot` creates a reset token and emails
+   the link to the account (`/forgot-password` and `/reset-password` pages; token
+   also returned in dev mode); `POST /auth/reset` consumes it and emails a
+   'password changed' notice
 5. **Invitation** — admin creates invite (`POST /companies/{id}/invitations`);
-   recipient accepts (`POST /auth/invitations/accept`) with the token; admin can
+   the invitee is emailed a link (`/web/inspectit-app.html?invite=<token>`, Reply-To the
+   inviter; the token is also returned to the admin); recipient accepts
+   (`POST /auth/invitations/accept`) with the token; admin can
    revoke anytime (`DELETE /companies/{id}/invitations/{id}`)
+
+### Admin-created accounts
+
+In the admin portal, **Create user** has "Email them a link to set their own
+password" (on by default): the backend sets a random password nobody sees, emails
+a welcome with a one-time link (`/reset-password?token=...&welcome=1`, valid 7 days),
+and shows no password. If the email can't be sent the one-time link is returned so
+the operator can pass it on. **Email reset link** on a user sends a normal reset
+link without changing anything until the person uses it. Unticking the box (or
+**Set password...**) keeps the old hand-over-a-password flow.
+
+### Free-trial lifecycle
+
+`POST /auth/trial-signup` starts a 30-day trial (`companies.trial_ends_at`, T).
+A background check (hourly, exactly-once across workers) walks each company
+through this timeline, emailing its administrators and managers at each step:
+
+| When | What happens |
+|---|---|
+| T - 7 days | Reminder: trial ends soon |
+| T | Trial ended. **7 days' grace**: full access continues |
+| T + 7 days | Account **paused**: every `/companies/{id}/...` route answers `402`. Records are kept 30 days (`access` = `suspended`) |
+| T + 30 days | Final warning: records will be deleted in 7 days |
+| T + 37 days | Records removed (soft delete) **only if `RETENTION_PURGE_ENABLED=1`** and the warning went out at least 7 days earlier (`access` = `expired` until then) |
+
+Login and `/me` keep working while paused; `/me` reports `access`
+(`none`/`trialing`/`grace`/`subscribed`/`suspended`/`expired`). Platform admins
+lift a pause with `PATCH /admin/companies/{id}/subscription {"active": true}` (a
+stand-in for a payment webhook until billing exists) or push the date with
+`POST .../extend-trial` (re-arms every email). Companies with no trial on record
+(everything created before 2026-10) are never paused, and neither are
+**complimentary** companies: test/comped accounts a platform admin creates (tick
+"Complimentary" when creating a user with a new company) or toggles on the
+Companies tab (`PATCH /admin/companies/{id}/complimentary`). They have no trial,
+no paywall, no trial emails and are skipped by the removal step. The removal step is OFF by
+default and only soft-deletes (`deleted_at`); hard-purging rows and stored files
+is not implemented. The app keeps a local copy of its data, so pausing blocks the
+cloud, not what is already on a user's device.
 
 ### Permission model
 
@@ -232,6 +274,21 @@ double-import (409 unless `?force=true`).
 | `STORAGE_BACKEND` | `local` | `s3` for DigitalOcean Spaces |
 | `STORAGE_DIR` | `./.filestore` | Local backend only |
 | `SPACES_REGION` / `BUCKET` / `KEY` / `SECRET` | — | Required when `STORAGE_BACKEND=s3` |
+| `RESEND_API_KEY` | *(unset)* | **Secret.** If set, email goes through Resend's HTTPS API (preferred; no mail ports) and the SMTP vars below are ignored |
+| `SMTP_PASSWORD` | *(unset = email off)* | Password for the sending mailbox. **Secret**: env only. Enables demo-request and new-trial notifications |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` | `smtp.office365.com` / 587 / `info@inspectit.app` | Microsoft 365 mailbox (via GoDaddy). 587 = STARTTLS; 465 = SSL (GoDaddy Workspace Email: `smtpout.secureserver.net`) |
+| `MAIL_TO` / `MAIL_FROM` / `MAIL_FROM_NAME` | `info@inspectit.app` / same / `Inspectit.app` | Where notifications go, and the From header |
+| `DEMO_RATE_LIMIT` / `DEMO_RATE_WINDOW_S` | 5 / 3600 | Per-IP budget for `POST /public/demo-requests` |
+| `APP_BASE_URL` | `https://inspectit.app` (prod) | Base of links inside emails (reset links) and calendar subscription links. Never taken from the Host header |
+| `CALENDAR_SECRET` | `JWT_SECRET` | **Secret.** Signs private calendar links (`/cal/<token>.ics`). Changing it invalidates every calendar link |
+| `CALENDAR_CACHE_S` | `900` | How long a built calendar feed is reused before it's rebuilt from synced data |
+| `CALENDAR_RATE_LIMIT` / `CALENDAR_RATE_WINDOW_S` | `60` / `3600` | Max fetches of one calendar link per window |
+| `INVITE_EMAIL_LIMIT` / `INVITE_EMAIL_WINDOW_S` | 20 / 3600 | Invitation emails per signed-in user per window; over it the invite is still created, only the email is skipped |
+| `TRIAL_REMINDER_DAYS` / `TRIAL_CHECK_INTERVAL_S` | 7 / 3600 | Trial-end reminder lead time; how often the background check runs (0 = off). Needs email configured |
+| `ADMIN_LINK_TTL_MIN` | 10080 (7 days) | How long a set-password link emailed from the admin portal stays valid |
+| `TRIAL_GRACE_DAYS` / `DATA_RETENTION_DAYS` / `RETENTION_WARNING_DAYS` | 7 / 30 / 7 | Grace after the trial, how long records are kept once paused, and how much notice before deletion |
+| `RETENTION_PURGE_ENABLED` | off | `1` lets the check remove (soft-delete) companies whose retention is over. Leave off until you want it |
+| `TRIAL_DAYS` | 30 | Length of the trial recorded by `POST /auth/trial-signup` |
 
 ---
 

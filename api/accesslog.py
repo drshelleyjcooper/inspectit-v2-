@@ -36,9 +36,12 @@ class AccessLogMiddleware:
             headers = dict(scope.get("headers") or [])
             client = scope.get("client")
             ip = client_ip_from_headers(headers, client[0] if client else None)
+            path = scope.get("path") or ""
+            if path.startswith("/cal/"):
+                path = "/cal/[link]"     # the calendar link is a secret
             logger.info(json.dumps({
                 "method": scope.get("method"),
-                "path": scope.get("path"),
+                "path": path,
                 "status": status["code"],
                 "ms": round((time.monotonic() - start) * 1000, 1),
                 "ip": ip,

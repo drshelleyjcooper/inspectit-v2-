@@ -44,6 +44,8 @@
   .err { color:var(--defect); margin-top:8px; min-height:1.3em; }
   .login { max-width:380px; margin:80px auto; }
   .secret { background:#FFF8E1; border:1px solid #F5D77A; border-radius:8px; padding:12px; margin-top:12px; font-family:ui-monospace,Menlo,monospace; word-break:break-all; }
+  .pill.badge { background:var(--blue); color:#fff; font-weight:600; }
+  .pill.new { background:#E3EDFB; color:var(--blue); } .pill.contacted { background:#FFF1DB; color:var(--attn); } .pill.closed { background:#EEF2F7; color:var(--muted); }
   .bar { display:inline-block; height:8px; background:var(--blue); border-radius:3px; vertical-align:middle; }
 </style>
 </head>
@@ -71,6 +73,7 @@
     <button data-tab="stats" class="active">Usage</button>
     <button data-tab="users">Users</button>
     <button data-tab="companies">Companies</button>
+    <button data-tab="demos">Demo requests <span class="pill badge hidden" id="demoBadge"></span></button>
   </nav>
   <main>
     <section id="tab-stats">
@@ -89,11 +92,13 @@
           <div><label>Name</label><input id="cName"></div>
           <div><label>Email</label><input id="cEmail" type="email"></div>
           <div><label>Password <span class="muted">(blank = generate)</span></label><input id="cPass" type="text" autocomplete="off"></div>
+          <div><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cEmailSetup" checked style="min-width:0"> Email them a link to set their own password</label></div>
         </div>
         <div class="row" style="margin-top:10px">
           <div><label>Company</label>
             <select id="cCompany"><option value="">— none —</option><option value="__new__">+ New company…</option></select></div>
           <div id="cNewCoWrap" class="hidden"><label>New company name</label><input id="cNewCo"></div>
+          <div id="cCompWrap" class="hidden"><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cComp" style="min-width:0"> Complimentary (test) account <span class="small muted">no trial, no paywall</span></label></div>
           <div><label>Role</label><select id="cRole"></select></div>
           <div><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cAdmin" style="min-width:0"> Platform admin</label></div>
           <button class="btn primary" id="createBtn">Create</button>
@@ -109,6 +114,18 @@
         <p class="small muted" id="uCount"></p>
         <table id="userTable"></table>
         <div id="resetOut" class="secret hidden"></div>
+      </div>
+    </section>
+
+    <section id="tab-demos" class="hidden">
+      <div class="card">
+        <div class="row">
+          <div><label for="dFilter">Show</label>
+            <select id="dFilter"><option value="new">New</option><option value="contacted">Contacted</option><option value="closed">Closed</option><option value="">All</option></select></div>
+          <button class="btn" id="dRefresh">Refresh</button>
+        </div>
+        <p class="small muted" id="dCount"></p>
+        <table id="demoTable"></table>
       </div>
     </section>
 
@@ -182,17 +199,18 @@ async function boot() {
     return;
   }
   $("who").textContent = session.email || "";
-  showApp(); setTab("stats");
+  showApp(); setTab("stats"); loadDemoBadge();
 }
 
 /* ---------- tabs ---------- */
 document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
 function setTab(name) {
   document.querySelectorAll("nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-  ["stats","users","companies"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== name));
+  ["stats","users","companies","demos"].forEach(t => $("tab-" + t).classList.toggle("hidden", t !== name));
   if (name === "stats") loadStats();
   if (name === "users") { loadCompaniesInto(); loadRoles(); loadUsers(); }
   if (name === "companies") loadCompanies();
+  if (name === "demos") loadDemos();
 }
 
 /* ---------- stats ---------- */
@@ -206,6 +224,7 @@ async function loadStats() {
     ["Live sessions", T.live_sessions], ["Collections synced 24h", A.syncs_24h],
     ["Files", T.files + " · " + bytes(T.file_bytes)], ["Pending invites", T.pending_invitations],
     ["Disabled users", T.users_disabled], ["Platform admins", T.platform_admins],
+    ["New demo requests", T.demo_requests_new], ["Active trials", T.trials_active], ["Complimentary accounts", T.complimentary], ["Trials in grace", T.trials_grace], ["Suspended trials", T.trials_suspended],
   ];
   $("statGrid").innerHTML = stats.map(([l, n]) => `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join("");
   const max = Math.max(1, ...s.signups_daily.map(d => d.n));
@@ -230,10 +249,53 @@ async function loadCompaniesInto() {
 }
 async function loadCompanies() {
   const { data } = await api("/admin/companies");
-  $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Created</th><th>ID</th></tr>" +
-    data.map(c => `<tr><td>${esc(c.name)}</td><td>${c.members}</td><td class="muted">${esc(fmtDate(c.created_at))}</td><td class="small muted">${esc(c.id)}</td></tr>`).join("");
+  const day = ts => fmtDate(ts).split(",")[0];
+  const status = c => {
+    if (c.access === "complimentary") return '<span class="pill admin">complimentary</span><div class="small muted">test / comped</div>';
+    if (c.access === "subscribed") return '<span class="pill admin">subscribed</span>';
+    if (c.access === "none") return '<span class="muted">—</span>';
+    const left = Math.ceil((new Date(c.trial_ends_at) - Date.now()) / 86400000);
+    if (c.access === "grace") return '<span class="pill contacted">grace period</span><div class="small muted">paused after ' + esc(day(c.grace_ends_at)) + "</div>";
+    if (c.access === "expired") return '<span class="pill off">retention over</span><div class="small muted">records due for deletion</div>';
+    return c.access === "suspended"
+      ? '<span class="pill off">suspended</span><div class="small muted">trial ended ' + esc(day(c.trial_ends_at)) + "</div>"
+      : '<span class="pill new">trial</span><div class="small muted">ends ' + esc(day(c.trial_ends_at)) + " (" + left + " d left)</div>";
+  };
+  const comp = c => c.access === "complimentary"
+    ? '<button class="btn sm" data-co="uncomp">Remove complimentary</button>'
+    : ' <button class="btn sm" data-co="comp">Make complimentary</button>';
+  const actions = c => c.access === "complimentary" ? comp(c) : (c.access === "subscribed"
+      ? '<button class="btn sm" data-co="unsub">Remove subscription</button>'
+      : '<button class="btn sm primary" data-co="sub">Mark subscribed</button>')
+    + (["trialing", "grace", "suspended", "expired"].includes(c.access) ? ' <button class="btn sm" data-co="extend">Extend trial</button>' : "") + comp(c);
+  $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Trial / plan</th><th>Created</th><th></th></tr>" +
+    data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actions(c)}</td></tr>`).join("");
 }
-$("cCompany").addEventListener("change", () => $("cNewCoWrap").classList.toggle("hidden", $("cCompany").value !== "__new__"));
+$("companyTable").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-co]"); if (!btn) return;
+  const tr = btn.closest("tr"), id = tr.dataset.id, name = tr.dataset.name;
+  btn.disabled = true;
+  try {
+    if (btn.dataset.co === "extend") {
+      const n = prompt("Extend the trial for " + name + " by how many days?", "14");
+      if (n === null) return;
+      const days = parseInt(n, 10);
+      if (!(days >= 1 && days <= 365)) { alert("Enter a number of days from 1 to 365."); return; }
+      await api("/admin/companies/" + id + "/extend-trial", { method: "POST", body: { days } });
+    } else if (btn.dataset.co === "comp" || btn.dataset.co === "uncomp") {
+      const on = btn.dataset.co === "comp";
+      if (!confirm(on ? "Make " + name + " a complimentary (test) account? It will have no trial and no paywall, and no trial emails." : "Remove complimentary status from " + name + "?")) return;
+      await api("/admin/companies/" + id + "/complimentary", { method: "PATCH", body: { active: on } });
+    } else {
+      const on = btn.dataset.co === "sub";
+      if (!confirm((on ? "Mark " + name + " as subscribed? Any suspension is lifted." : "Remove the subscription for " + name + "? If its trial is over it will be suspended again."))) return;
+      await api("/admin/companies/" + id + "/subscription", { method: "PATCH", body: { active: on } });
+    }
+    await loadCompanies();
+  } catch (ex) { alert(ex.message); }
+  finally { btn.disabled = false; }
+});
+$("cCompany").addEventListener("change", () => { const nw = $("cCompany").value === "__new__"; $("cNewCoWrap").classList.toggle("hidden", !nw); $("cCompWrap").classList.toggle("hidden", !nw); if (!nw) $("cComp").checked = false; });
 
 /* Roles are the built-in presets; any company's /roles lists them, so use the
    first company we know about (there's always at least the admin's own). */
@@ -256,7 +318,8 @@ async function loadUsers() {
       <td class="muted">${esc(ago(u.last_login_at))}</td>
       <td class="muted small">${esc(fmtDate(u.created_at))}</td>
       <td style="white-space:nowrap">
-        <button class="btn sm" data-act="reset">Reset password</button>
+        <button class="btn sm" data-act="email">Email reset link</button>
+        <button class="btn sm" data-act="reset">Set password…</button>
         <button class="btn sm ${u.disabled_at ? "" : "danger"}" data-act="toggle">${u.disabled_at ? "Enable" : "Disable"}</button>
       </td></tr>`).join("");
 }
@@ -269,7 +332,14 @@ $("userTable").addEventListener("click", async e => {
   const email = tr.querySelector(".small.muted").textContent;
   btn.disabled = true;
   try {
-    if (btn.dataset.act === "reset") {
+    if (btn.dataset.act === "email") {
+      if (!confirm("Email " + email + " a link to choose a new password? Their current password keeps working until they use it.")) return;
+      const { data } = await api("/admin/users/" + id + "/reset-password", { method: "POST", body: { send_email: true } });
+      const o = $("resetOut"); o.classList.remove("hidden");
+      o.textContent = data.setup_email_sent
+        ? "A reset link was emailed to " + data.email + "."
+        : "The email could not be sent. Give " + data.email + " this one-time link (works for 7 days):  " + data.setup_link;
+    } else if (btn.dataset.act === "reset") {
       const custom = prompt("New password for " + email + "\n(leave blank to generate one):", "");
       if (custom === null) return;
       const { data } = await api("/admin/users/" + id + "/reset-password", { method: "POST", body: custom ? { password: custom } : {} });
@@ -291,16 +361,55 @@ $("createBtn").addEventListener("click", async () => {
     const co = $("cCompany").value;
     const body = { name: $("cName").value.trim(), email: $("cEmail").value.trim(), role: $("cRole").value,
                    is_platform_admin: $("cAdmin").checked };
-    if ($("cPass").value) body.password = $("cPass").value;
-    if (co === "__new__") body.company_name = $("cNewCo").value.trim();
+    if ($("cEmailSetup").checked) body.send_setup_email = true;
+    else if ($("cPass").value) body.password = $("cPass").value;
+    if (co === "__new__") { body.company_name = $("cNewCo").value.trim(); if ($("cComp").checked) body.complimentary = true; }
     else if (co) body.company_id = co;
     const { data } = await api("/admin/users", { method: "POST", body });
     const o = $("createOut"); o.classList.remove("hidden");
-    o.textContent = "Created " + data.email + ". Password: " + data.password + (data.password_generated ? "   (generated — shown once, copy it now)" : "");
-    ["cName","cEmail","cPass","cNewCo"].forEach(i => $(i).value = ""); $("cAdmin").checked = false;
+    if ("setup_email_sent" in data) {
+      o.textContent = data.setup_email_sent
+        ? "Created " + data.email + ". A welcome email with a link to set their password was sent."
+        : "Created " + data.email + ", but the email could not be sent. Give them this one-time link (works for 7 days):  " + data.setup_link;
+    } else {
+      o.textContent = "Created " + data.email + ". Password: " + data.password + (data.password_generated ? "   (generated — shown once, copy it now)" : "");
+    }
+    ["cName","cEmail","cPass","cNewCo"].forEach(i => $(i).value = ""); $("cAdmin").checked = false; $("cComp").checked = false; $("cEmailSetup").checked = true;
     await loadUsers(); await loadCompaniesInto();
   } catch (ex) { $("createErr").textContent = ex.message; }
   finally { $("createBtn").disabled = false; }
+});
+
+/* ---------- demo requests (website "Schedule a Demo" form) ---------- */
+async function loadDemoBadge() {
+  try {
+    const { total } = await api("/admin/demo-requests?status=new&limit=1");
+    const n = Number(total || 0), b = $("demoBadge");
+    b.textContent = n; b.classList.toggle("hidden", !n);
+  } catch (_) {}
+}
+async function loadDemos() {
+  const st = $("dFilter").value;
+  const { data, total } = await api("/admin/demo-requests?limit=200" + (st ? "&status=" + st : ""));
+  $("dCount").textContent = total + " request" + (total == 1 ? "" : "s");
+  $("demoTable").innerHTML = data.length
+    ? "<tr><th>Who</th><th>Vehicles / properties</th><th>Requested</th><th>Status</th><th></th></tr>" +
+      data.map(r => `<tr data-id="${esc(r.id)}">
+        <td>${esc(r.name)}<div class="small"><a href="mailto:${esc(r.email)}?subject=${encodeURIComponent("Your Inspectit.app demo")}">${esc(r.email)}</a></div></td>
+        <td>${r.asset_count == null ? '<span class="muted">—</span>' : esc(r.asset_count)}</td>
+        <td class="muted" title="${esc(fmtDate(r.created_at))}">${esc(ago(r.created_at))}</td>
+        <td><span class="pill ${esc(r.status)}">${esc(r.status)}</span>${r.handled_at ? `<div class="small muted">${esc(fmtDate(r.handled_at))}</div>` : ""}</td>
+        <td style="white-space:nowrap">${r.status !== "contacted" ? '<button class="btn sm" data-set="contacted">Mark contacted</button> ' : ""}${r.status !== "closed" ? '<button class="btn sm" data-set="closed">Close</button> ' : ""}${r.status !== "new" ? '<button class="btn sm" data-set="new">Reopen</button>' : ""}</td></tr>`).join("")
+    : '<tr><td class="muted">Nothing here.</td></tr>';
+  loadDemoBadge();
+}
+$("dFilter").addEventListener("change", loadDemos);
+$("dRefresh").addEventListener("click", loadDemos);
+$("demoTable").addEventListener("click", async e => {
+  const btn = e.target.closest("button[data-set]"); if (!btn) return;
+  btn.disabled = true;
+  try { await api("/admin/demo-requests/" + btn.closest("tr").dataset.id, { method: "PATCH", body: { status: btn.dataset.set } }); await loadDemos(); }
+  catch (ex) { alert(ex.message); btn.disabled = false; }
 });
 
 boot();

@@ -636,3 +636,17 @@ Open items to confirm when convenient (none block building):
    should also be assignable to a subset (e.g. a regional property manager). Schema
    already supports it via `scope='assigned'` + `duty='manage'` if wanted later.
 3. Retention: how long soft-deleted rows are kept before purge (suggest 90 days).
+
+### 2026-10-06 — Calendar reminders (one-way ICS subscription)
+- Each member opts in from **Home → Calendar**; prefs in `calendar_feeds.prefs`
+  (migration 010). Categories: maintenance, inspections, repairs, project payments,
+  warranties, registration/renewal (vehicle "Compliance" items). Only categories the
+  member's roles can view company-wide are offered or included (rechecked on every fetch).
+- Link `/cal/<b64(feed id)+b64(HMAC(CALENDAR_SECRET, id:nonce))>.ics`: no user/company
+  in the URL; DB alone can't rebuild it; reset = new nonce; off = revoked_at.
+- Feed is computed server-side from `app_collections` (needs Cloud sync), porting the
+  app's pmStatus/vehStatus rules to `api/calendar_feed.py`. Basic mode (default) groups
+  events per category/day with no names; Detailed has one event per item with stable UIDs.
+- New app data: `vehicleInspSchedule`/`propertyInspSchedule` `{id:{freq,miles,start}}`;
+  ticket `dueBy` (blank → overdue 14 days after ticket date); per-entity maintenance
+  schedule choice saved as `"__tmpl__"` in the maintenance state map.

@@ -47,6 +47,28 @@ services:
       # account. Comma-separated.
       - key: PLATFORM_ADMIN_EMAILS
         value: "you@inspectit.app"
+      # Email (Microsoft 365 mailbox bought via GoDaddy). Set SMTP_PASSWORD in the DO console
+      # (type SECRET). Without it, notifications are skipped, not errors.
+      - key: RESEND_API_KEY
+        type: SECRET
+      # Signs private calendar links (/cal/<token>.ics). Optional — falls back
+      # to JWT_SECRET; set it so rotating JWT_SECRET doesn't break calendar
+      # links. Changing it invalidates every calendar link.
+      - key: CALENDAR_SECRET
+        type: SECRET
+      - key: SMTP_HOST
+        value: smtp.office365.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        value: info@inspectit.app
+      - key: SMTP_PASSWORD
+        type: SECRET
+      - key: MAIL_TO
+        value: info@inspectit.app
+      # Deleting expired trial accounts stays OFF until you set this to "1".
+      - key: RETENTION_PURGE_ENABLED
+        value: "0"
       - key: STORAGE_BACKEND
         value: s3
       - key: SPACES_REGION

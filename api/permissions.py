@@ -22,6 +22,7 @@ from fastapi import Depends, HTTPException, Request
 
 from .db import get_pool
 from .security import decode_token
+from .trial import access_state, blocked
 
 MODULE_SUBJECT = {"projects": "project"}
 for _m in ("vehicles", "vehicle_inspections", "vehicle_maintenance",
@@ -133,6 +134,18 @@ def company_member(company_id: str, user: dict = Depends(current_user)) -> AuthC
         ).fetchone()
         if not m:
             raise HTTPException(403, "Not a member of this company")
+        co = conn.execute(
+            "SELECT trial_ends_at, subscribed_at, deleted_at, complimentary FROM companies WHERE id = %s",
+            (company_id,)).fetchone()
+        if co and co["deleted_at"] is not None:
+            raise HTTPException(404, "Company not found")
+        if co:
+            state = access_state(co["trial_ends_at"], co["subscribed_at"],
+                                 complimentary=co["complimentary"])
+            if blocked(state):
+                raise HTTPException(
+                    402, "Your free trial has ended and the account is paused. "
+                         "Subscribe to keep using Inspectit.app.")
         roles = conn.execute(
             """SELECT r.id, r.name, r.scope, r.permissions,
                       r.grants, r.viewer_grants

@@ -3,6 +3,7 @@
 Startup runs pending migrations and seeds the built-in role presets, so a
 fresh database (local pgserver or DO Managed Postgres) self-initializes.
 """
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -19,10 +20,11 @@ from .db import cleanup_expired, get_pool, run_migrations
 from .presets import seed_role_presets
 from .ratelimit import client_ip
 from .requestmeta import RequestMetaMiddleware
+from .trial import trial_loop
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from .routers import (admin, assignments, auth, collections, companies,
-                      entities, importer, me, members)
+from .routers import (admin, assignments, auth, calendar, collections,
+                      companies, entities, importer, me, members, public)
 
 
 log = logging.getLogger("inspectit")
@@ -41,7 +43,11 @@ async def lifespan(app: FastAPI):
         log.info("Database ready")
     except Exception as exc:
         log.error("Startup DB init failed (app will serve, DB routes will error): %s", exc)
-    yield
+    task = asyncio.create_task(trial_loop())     # trial reminders / ended notices
+    try:
+        yield
+    finally:
+        task.cancel()
 
 
 app = FastAPI(title="Inspectit API", version="0.1.0", lifespan=lifespan)
@@ -75,6 +81,8 @@ app.include_router(assignments.router)
 app.include_router(importer.router)
 app.include_router(collections.router)
 app.include_router(admin.router)
+app.include_router(public.router)
+app.include_router(calendar.router)
 
 
 @app.get("/health")
@@ -103,10 +111,36 @@ def health(request: Request):
 _NO_CACHE = {"Cache-Control": "no-cache"}
 
 
+# Marketing site (site/): served same-origin so its forms call /auth/trial-signup
+# and /public/demo-requests without CORS. The previous landing page (index.html
+# at the repo root) is the fallback if site/ is ever absent.
+SITE_DIR = config.PROJECT_ROOT / "site"
+
+
 @app.get("/")
 def landing():
-    return FileResponse(config.PROJECT_ROOT / "index.html", media_type="text/html",
-                        headers=_NO_CACHE)
+    page = SITE_DIR / "index.html"
+    if not page.exists():
+        page = config.PROJECT_ROOT / "index.html"
+    return FileResponse(page, media_type="text/html", headers=_NO_CACHE)
+
+
+def _account_page(name: str):
+    # The reset page carries a secret token in its URL: never let it be cached
+    # or leaked through the Referer header or search indexes.
+    return FileResponse(SITE_DIR / name, media_type="text/html",
+                        headers={**_NO_CACHE, "Referrer-Policy": "no-referrer",
+                                 "X-Robots-Tag": "noindex"})
+
+
+@app.get("/forgot-password")
+def forgot_password_page():
+    return _account_page("forgot-password.html")
+
+
+@app.get("/reset-password")
+def reset_password_page():
+    return _account_page("reset-password.html")
 
 
 @app.get("/web/inspectit-app.html")
@@ -123,3 +157,8 @@ def admin_shell():
 
 app.mount("/web", StaticFiles(directory=config.PROJECT_ROOT / "web", html=True),
           name="web")
+
+# Static assets for the marketing site. Mounted last so the API routes above win.
+for _name in ("css", "js", "assets"):
+    if (SITE_DIR / _name).is_dir():
+        app.mount(f"/{_name}", StaticFiles(directory=SITE_DIR / _name), name=f"site-{_name}")

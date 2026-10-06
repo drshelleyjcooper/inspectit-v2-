@@ -5,13 +5,18 @@ from typing import List
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import (APIRouter, BackgroundTasks, Depends, HTTPException, Query,
+                     Response)
 from pydantic import BaseModel
 
-from .. import config, security
+import logging
+
+from .. import config, mailer, security
 from ..db import audit, get_pool
 from ..permissions import AuthContext, company_member, require, require_any
 from ..presets import ADMIN, BLOCKED_COMBINATIONS
+
+log = logging.getLogger("inspectit")
 
 router = APIRouter(prefix="/companies/{company_id}", tags=["members"])
 
@@ -64,7 +69,7 @@ class InviteIn(BaseModel):
 
 
 @router.post("/invitations")
-def create_invitation(body: InviteIn,
+def create_invitation(body: InviteIn, background: BackgroundTasks,
                       ctx: AuthContext = Depends(require("company", "assign"))):
     email = body.email.strip().lower()
     if "@" not in email:
@@ -106,8 +111,21 @@ def create_invitation(body: InviteIn,
         ).fetchone()
         audit(conn, ctx.company_id, ctx.user["id"], "assign", "invitation",
               inv["id"], {"email": email, "roles": sorted(wanted)})
-    # The token goes in the invite email once a mailer exists; returned for now
-    # so the admin can hand the link to the invitee directly.
+        company_name = (conn.execute("SELECT name FROM companies WHERE id = %s",
+                                     (ctx.company_id,)).fetchone() or {}).get("name")
+    # Email the invitee. The token is also returned so an admin can still hand
+    # over the link directly (the app's invite screen relies on it). Sent in the
+    # background; over the per-user budget the email is skipped, not the invite.
+    try:
+        mailer.invite_mail_limiter.check(str(ctx.user["id"]))
+        link = f"{config.APP_BASE_URL}/web/inspectit-app.html?invite={token}"
+        subject, text = mailer.invitation_email(
+            ctx.user.get("name"), company_name, sorted(wanted), link,
+            config.INVITE_TTL_DAYS)
+        background.add_task(mailer.send_mail, subject, text,
+                            ctx.user.get("email"), email)
+    except HTTPException:
+        log.warning("invitation email skipped: rate limit for user %s", ctx.user["id"])
     return {"invitation_id": str(inv["id"]), "token": token}
 
 
