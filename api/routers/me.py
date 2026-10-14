@@ -48,12 +48,15 @@ def me(user: dict = Depends(current_user)):
                 "permissions": {k: sorted(v) for k, v in effective.items()},
                 "can_grant_viewers": bool(m["can_grant_viewers"]),
                 # 'none' | 'complimentary' | 'trialing' | 'grace' | 'subscribed' | 'suspended' | 'expired'. A suspended
-                # company's data routes answer 402; this lets the app say why.
+                # company is read-only (changes answer 402); this lets the app say why.
                 "access": access_state(m["trial_ends_at"], m["subscribed_at"],
                                        complimentary=m["complimentary"]),
                 "trial_ends_at": m["trial_ends_at"],
                 "grace_ends_at": (timeline(m["trial_ends_at"])["grace_ends_at"]
                                   if m["trial_ends_at"] else None),
+                # When a paused account's records are due for deletion.
+                "delete_at": (timeline(m["trial_ends_at"])["delete_at"]
+                              if m["trial_ends_at"] else None),
                 "subscribed": m["subscribed_at"] is not None,
             })
     return {

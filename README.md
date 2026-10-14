@@ -193,7 +193,7 @@ through this timeline, emailing its administrators and managers at each step:
 |---|---|
 | T - 7 days | Reminder: trial ends soon |
 | T | Trial ended. **7 days' grace**: full access continues |
-| T + 7 days | Account **paused**: every `/companies/{id}/...` route answers `402`. Records are kept 30 days (`access` = `suspended`) |
+| T + 7 days | Account **paused** (read-only): `/companies/{id}/...` reads still work, every change answers `402` (members may still turn off or reset their calendar link). Records are kept 30 days (`access` = `suspended`) |
 | T + 30 days | Final warning: records will be deleted in 7 days |
 | T + 37 days | Company **removed** (hidden, restorable) **only if `RETENTION_PURGE_ENABLED=1`** and the warning went out at least 7 days earlier (`access` = `expired` until then) |
 | T + 44 days | **Deleted for good** (`HARD_PURGE_DELAY_DAYS`): database rows, uploaded files, and members who belonged to nothing else (`api/purge.py`) |

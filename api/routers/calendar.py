@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from .. import calendar_feed as cf
 from .. import config
 from ..db import audit, get_pool
-from ..permissions import AuthContext, company_member
+from ..permissions import AuthContext, company_member, company_member_paused_ok
 from ..ratelimit import RateLimiter
 from ..trial import access_state, blocked
 
@@ -108,7 +108,7 @@ def put_calendar(body: CalendarIn, response: Response,
 
 
 @router.post("/companies/{company_id}/calendar/reset")
-def reset_calendar(response: Response, ctx: AuthContext = Depends(company_member)):
+def reset_calendar(response: Response, ctx: AuthContext = Depends(company_member_paused_ok)):
     _no_store(response)
     with get_pool().connection() as conn:
         row = _live_feed(conn, ctx.company_id, ctx.user["id"])
@@ -126,7 +126,7 @@ def reset_calendar(response: Response, ctx: AuthContext = Depends(company_member
 
 
 @router.delete("/companies/{company_id}/calendar")
-def delete_calendar(ctx: AuthContext = Depends(company_member)):
+def delete_calendar(ctx: AuthContext = Depends(company_member_paused_ok)):
     with get_pool().connection() as conn:
         row = conn.execute(
             """UPDATE calendar_feeds SET revoked_at = now()

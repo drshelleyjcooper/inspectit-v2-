@@ -119,7 +119,7 @@ INVITE_EMAIL_WINDOW_S = int(os.environ.get("INVITE_EMAIL_WINDOW_S", "3600"))
 TRIAL_REMINDER_DAYS = int(os.environ.get("TRIAL_REMINDER_DAYS", "7"))
 TRIAL_CHECK_INTERVAL_S = int(os.environ.get("TRIAL_CHECK_INTERVAL_S", "3600"))
 # After the trial ends: full access for TRIAL_GRACE_DAYS, then the account is
-# paused (402) and its records are kept DATA_RETENTION_DAYS. A final warning
+# paused (read-only: changes answer 402) and its records are kept DATA_RETENTION_DAYS. A final warning
 # goes out RETENTION_WARNING_DAYS before deletion. Deletion itself only runs
 # when RETENTION_PURGE_ENABLED=1 (default OFF: it removes a customer's access
 # to their records, so switch it on deliberately).

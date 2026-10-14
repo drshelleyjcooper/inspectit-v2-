@@ -6,8 +6,8 @@ Access state per company (see migrations/006, 007):
     trialing    trial_ends_at in the future
     grace       trial over, within TRIAL_GRACE_DAYS: full access, nudged to subscribe
     subscribed  subscribed_at set (paid): always allowed
-    suspended   grace over, records kept DATA_RETENTION_DAYS: company routes answer 402
-    expired     retention over: still 402; records are due for deletion
+    suspended   grace over, records kept DATA_RETENTION_DAYS: read-only, changes answer 402
+    expired     retention over: still read-only; records are due for deletion
 
 Emails are exactly-once across worker processes: each cycle first *claims* the
 companies it will email with an atomic UPDATE ... RETURNING on the marker
