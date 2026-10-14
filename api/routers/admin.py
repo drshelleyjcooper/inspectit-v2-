@@ -5,6 +5,9 @@ company administrators (they use /companies/{id}/...). Every route requires
 users.is_platform_admin (see permissions.platform_admin).
 
     GET   /admin/stats                    usage overview
+    POST  /admin/companies/{id}/purge     delete a company for good (type its name)
+    POST  /admin/companies/{id}/restore   undo a removal before it is deleted for good
+    GET   /admin/purge-log                what has been deleted for good
     GET   /admin/demo-requests            "Schedule a Demo" requests (?status=)
     PATCH /admin/demo-requests/{id}       mark new / contacted / closed
     GET   /admin/companies                companies + member counts
@@ -16,6 +19,7 @@ users.is_platform_admin (see permissions.platform_admin).
 Bootstrapping: PLATFORM_ADMIN_EMAILS env var -> promote_platform_admins()
 runs at startup. The frontend is web/admin.html.
 """
+import datetime as dt
 import secrets
 import string
 import uuid
@@ -26,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from .. import config, mailer, security
 from .auth import issue_password_token
+from ..purge import PurgeRefused, purge_company
 from ..db import audit, get_pool
 from ..permissions import platform_admin
 from ..trial import access_state, timeline
@@ -188,22 +193,75 @@ def stats():
 
 @router.get("/companies")
 def list_companies(q: Optional[str] = None,
+                   include_removed: bool = False,
                    limit: int = Query(200, ge=1, le=500),
                    offset: int = Query(0, ge=0)):
     with get_pool().connection() as conn:
         rows = conn.execute("""
             SELECT c.id, c.name, c.created_at, c.trial_ends_at, c.subscribed_at, c.complimentary,
+                   c.deleted_at,
                    count(m.id) FILTER (WHERE m.deleted_at IS NULL AND m.status = 'active') AS members
             FROM companies c
             LEFT JOIN memberships m ON m.company_id = c.id
-            WHERE c.deleted_at IS NULL AND c.name ILIKE %s
+            WHERE (c.deleted_at IS NULL OR %s) AND c.name ILIKE %s
             GROUP BY c.id ORDER BY c.name LIMIT %s OFFSET %s
-        """, (f"%{q}%" if q else "%", limit, offset)).fetchall()
-    return [{**r, "id": str(r["id"]),
-             "access": access_state(r["trial_ends_at"], r["subscribed_at"],
-                                    complimentary=r["complimentary"]),
-             "grace_ends_at": (timeline(r["trial_ends_at"])["grace_ends_at"]
-                               if r["trial_ends_at"] else None)}
+        """, (include_removed, f"%{q}%" if q else "%", limit, offset)).fetchall()
+    out = []
+    for r in rows:
+        removed = r["deleted_at"] is not None
+        out.append({**r, "id": str(r["id"]),
+                    "access": "removed" if removed else access_state(
+                        r["trial_ends_at"], r["subscribed_at"], complimentary=r["complimentary"]),
+                    "grace_ends_at": (timeline(r["trial_ends_at"])["grace_ends_at"]
+                                      if r["trial_ends_at"] else None),
+                    # when the hold ends and it is deleted for good (retention path)
+                    "deleted_for_good_at": (r["deleted_at"] + dt.timedelta(days=config.HARD_PURGE_DELAY_DAYS)
+                                            if removed else None)})
+    return out
+
+
+@router.post("/companies/{company_id}/restore")
+def restore_company(company_id: str, admin: dict = Depends(platform_admin)):
+    """Bring back a company that was removed but not yet deleted for good. It
+    gets a fresh warning period, so the next hourly check does not remove it
+    again; subscribe it, extend its trial or make it complimentary to keep it."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        row = conn.execute(
+            """UPDATE companies SET deleted_at = NULL, deletion_warning_sent_at = now()
+               WHERE id = %s AND deleted_at IS NOT NULL RETURNING id""", (cid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "No removed company with that id (it may already be deleted for good)")
+        audit(conn, cid, admin["id"], "update", "company", cid, {"event": "restored"})
+    return {"id": str(cid), "restored": True}
+
+
+class PurgeIn(BaseModel):
+    confirm: str = Field(min_length=1, max_length=300)    # the company's exact name
+
+
+@router.post("/companies/{company_id}/purge")
+def purge_now(company_id: str, body: PurgeIn, admin: dict = Depends(platform_admin)):
+    """Permanently delete a company: its records, uploaded files, and members
+    who belonged to nothing else. Cannot be undone. The caller must type the
+    company's exact name."""
+    cid = _uuid(company_id, "Company")
+    try:
+        return purge_company(cid, "admin", requested_by=admin["id"],
+                             confirm_name=body.confirm, require_removed=False)
+    except PurgeRefused as exc:
+        raise HTTPException(exc.status, str(exc))
+
+
+@router.get("/purge-log")
+def purge_log(limit: int = Query(50, ge=1, le=200)):
+    with get_pool().connection() as conn:
+        rows = conn.execute(
+            """SELECT id, company_id, reason, requested_by, files_deleted, bytes_deleted,
+                      users_deleted, users_kept, purged_at
+               FROM purge_log ORDER BY purged_at DESC LIMIT %s""", (limit,)).fetchall()
+    return [{**r, "company_id": str(r["company_id"]),
+             "requested_by": str(r["requested_by"]) if r["requested_by"] else None}
             for r in rows]
 
 

@@ -127,6 +127,10 @@ TRIAL_GRACE_DAYS = int(os.environ.get("TRIAL_GRACE_DAYS", "7"))
 DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
 RETENTION_WARNING_DAYS = int(os.environ.get("RETENTION_WARNING_DAYS", "7"))
 RETENTION_PURGE_ENABLED = os.environ.get("RETENTION_PURGE_ENABLED", "") == "1"
+# A company removed by the retention step is first only hidden (restorable by a
+# platform admin). This many days later it is permanently deleted: database
+# rows, uploaded files, and members who belonged to nothing else.
+HARD_PURGE_DELAY_DAYS = int(os.environ.get("HARD_PURGE_DELAY_DAYS", "7"))
 # Length of the free trial granted by POST /auth/trial-signup.
 TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "30"))
 

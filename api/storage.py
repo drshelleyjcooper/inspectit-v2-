@@ -49,6 +49,17 @@ class LocalDiskStorage:
     def url_for(self, key: str, expires_s: int = 900) -> str:
         return f"file://{self.root / key}"
 
+    def delete_company(self, company_id: str):
+        """Remove every stored file for a company. Returns (files, bytes)."""
+        import shutil
+        folder = self.root / str(company_id)
+        if not folder.is_dir():
+            return 0, 0
+        files = [f for f in folder.rglob("*") if f.is_file()]
+        total = sum(f.stat().st_size for f in files)
+        shutil.rmtree(folder)
+        return len(files), total
+
 
 class SpacesStorage:
     """DigitalOcean Spaces via the S3 API (boto3). Used when STORAGE_BACKEND=s3."""
@@ -70,6 +81,27 @@ class SpacesStorage:
         self.client.put_object(Bucket=self.bucket, Key=key, Body=data,
                                ContentType=mime, ACL="private")
         return key
+
+    def delete_company(self, company_id: str):
+        """Remove every object under <company_id>/. Returns (files, bytes).
+        Lists the first page, deletes it, and repeats until nothing is left
+        (never pages through a listing it is deleting from). Raises if any
+        object could not be deleted, so the caller can retry."""
+        prefix = f"{company_id}/"
+        count = total = 0
+        for _ in range(100000):                       # hard stop: never loop forever
+            page = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+            objs = page.get("Contents", [])
+            if not objs:
+                return count, total
+            resp = self.client.delete_objects(
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": o["Key"]} for o in objs], "Quiet": True})
+            if resp.get("Errors"):
+                raise RuntimeError(f"Spaces refused to delete {len(resp['Errors'])} object(s)")
+            count += len(objs)
+            total += sum(o.get("Size", 0) for o in objs)
+        raise RuntimeError("Spaces listing never emptied; stopping")
 
     def url_for(self, key: str, expires_s: int = 900) -> str:
         return self.client.generate_presigned_url(

@@ -195,7 +195,8 @@ through this timeline, emailing its administrators and managers at each step:
 | T | Trial ended. **7 days' grace**: full access continues |
 | T + 7 days | Account **paused**: every `/companies/{id}/...` route answers `402`. Records are kept 30 days (`access` = `suspended`) |
 | T + 30 days | Final warning: records will be deleted in 7 days |
-| T + 37 days | Records removed (soft delete) **only if `RETENTION_PURGE_ENABLED=1`** and the warning went out at least 7 days earlier (`access` = `expired` until then) |
+| T + 37 days | Company **removed** (hidden, restorable) **only if `RETENTION_PURGE_ENABLED=1`** and the warning went out at least 7 days earlier (`access` = `expired` until then) |
+| T + 44 days | **Deleted for good** (`HARD_PURGE_DELAY_DAYS`): database rows, uploaded files, and members who belonged to nothing else (`api/purge.py`) |
 
 Login and `/me` keep working while paused; `/me` reports `access`
 (`none`/`trialing`/`grace`/`subscribed`/`suspended`/`expired`). Platform admins
@@ -207,8 +208,14 @@ stand-in for a payment webhook until billing exists) or push the date with
 "Complimentary" when creating a user with a new company) or toggles on the
 Companies tab (`PATCH /admin/companies/{id}/complimentary`). They have no trial,
 no paywall, no trial emails and are skipped by the removal step. The removal step is OFF by
-default and only soft-deletes (`deleted_at`); hard-purging rows and stored files
-is not implemented. The app keeps a local copy of its data, so pausing blocks the
+default. Removal only hides the company (`deleted_at`); a platform admin can
+`POST /admin/companies/{id}/restore` it until the hold ends. Permanent deletion
+(`api/purge.py`) removes every company-owned table's rows, the stored files, the
+audit trail and member accounts that belong nowhere else, and leaves only a
+no-personal-data row in `purge_log` (`GET /admin/purge-log`). Admins can also
+delete one at once with `POST /admin/companies/{id}/purge` by typing its exact name.
+The routine refuses to run if the database has a company-owned table it does not
+know how to clean, so a future table cannot be silently left behind. The app keeps a local copy of its data, so pausing blocks the
 cloud, not what is already on a user's device.
 
 ### Permission model
@@ -287,6 +294,7 @@ double-import (409 unless `?force=true`).
 | `TRIAL_REMINDER_DAYS` / `TRIAL_CHECK_INTERVAL_S` | 7 / 3600 | Trial-end reminder lead time; how often the background check runs (0 = off). Needs email configured |
 | `ADMIN_LINK_TTL_MIN` | 10080 (7 days) | How long a set-password link emailed from the admin portal stays valid |
 | `TRIAL_GRACE_DAYS` / `DATA_RETENTION_DAYS` / `RETENTION_WARNING_DAYS` | 7 / 30 / 7 | Grace after the trial, how long records are kept once paused, and how much notice before deletion |
+| `HARD_PURGE_DELAY_DAYS` | 7 | Days a removed company is held (restorable) before it is deleted for good |
 | `RETENTION_PURGE_ENABLED` | off | `1` lets the check remove (soft-delete) companies whose retention is over. Leave off until you want it |
 | `TRIAL_DAYS` | 30 | Length of the trial recorded by `POST /auth/trial-signup` |
 
