@@ -130,7 +130,11 @@
     </section>
 
     <section id="tab-companies" class="hidden">
-      <div class="card"><table id="companyTable"></table></div>
+      <div class="card">
+        <label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px;margin-bottom:10px"><input type="checkbox" id="showRemoved" style="min-width:0"> Show removed companies <span class="small muted">(hidden after a trial ends; deleted for good a week later)</span></label>
+        <table id="companyTable"></table>
+      </div>
+      <div class="card"><h2>Deleted for good</h2><p class="small muted">A record of permanent deletions. It holds no names or emails, only ids and counts.</p><table id="purgeTable"></table></div>
     </section>
   </main>
 </div>
@@ -247,10 +251,20 @@ async function loadCompaniesInto() {
     data.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${c.members})</option>`).join("");
   sel.value = cur;
 }
+async function loadPurgeLog() {
+  const { data } = await api("/admin/purge-log");
+  $("purgeTable").innerHTML = data.length
+    ? "<tr><th>When</th><th>Reason</th><th>Files</th><th>Size</th><th>Accounts removed</th><th>Company id</th></tr>" +
+      data.map(r => `<tr><td class="muted small">${esc(fmtDate(r.purged_at))}</td><td>${r.reason === "retention" ? "trial ended" : "admin request"}</td><td>${r.files_deleted}</td><td>${esc(bytes(r.bytes_deleted))}</td><td>${r.users_deleted}</td><td class="small muted">${esc(r.company_id)}</td></tr>`).join("")
+    : '<tr><td class="muted">Nothing has been deleted for good.</td></tr>';
+}
+$("showRemoved").addEventListener("change", loadCompanies);
 async function loadCompanies() {
-  const { data } = await api("/admin/companies");
+  const { data } = await api("/admin/companies" + ($("showRemoved").checked ? "?include_removed=true" : ""));
+  loadPurgeLog();
   const day = ts => fmtDate(ts).split(",")[0];
   const status = c => {
+    if (c.access === "removed") return '<span class="pill off">removed</span><div class="small muted">deleted for good ' + esc(day(c.deleted_for_good_at)) + "</div>";
     if (c.access === "complimentary") return '<span class="pill admin">complimentary</span><div class="small muted">test / comped</div>';
     if (c.access === "subscribed") return '<span class="pill admin">subscribed</span>';
     if (c.access === "none") return '<span class="muted">—</span>';
@@ -264,10 +278,11 @@ async function loadCompanies() {
   const comp = c => c.access === "complimentary"
     ? '<button class="btn sm" data-co="uncomp">Remove complimentary</button>'
     : ' <button class="btn sm" data-co="comp">Make complimentary</button>';
-  const actions = c => c.access === "complimentary" ? comp(c) : (c.access === "subscribed"
+  const wipe = ' <button class="btn sm danger" data-co="purge">Delete permanently…</button>';
+  const actions = c => c.access === "removed" ? '<button class="btn sm primary" data-co="restore">Restore</button>' + wipe : (c.access === "complimentary" ? comp(c) : (c.access === "subscribed"
       ? '<button class="btn sm" data-co="unsub">Remove subscription</button>'
       : '<button class="btn sm primary" data-co="sub">Mark subscribed</button>')
-    + (["trialing", "grace", "suspended", "expired"].includes(c.access) ? ' <button class="btn sm" data-co="extend">Extend trial</button>' : "") + comp(c);
+    + (["trialing", "grace", "suspended", "expired"].includes(c.access) ? ' <button class="btn sm" data-co="extend">Extend trial</button>' : "") + comp(c)) + wipe;
   $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Trial / plan</th><th>Created</th><th></th></tr>" +
     data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actions(c)}</td></tr>`).join("");
 }
@@ -282,6 +297,14 @@ $("companyTable").addEventListener("click", async e => {
       const days = parseInt(n, 10);
       if (!(days >= 1 && days <= 365)) { alert("Enter a number of days from 1 to 365."); return; }
       await api("/admin/companies/" + id + "/extend-trial", { method: "POST", body: { days } });
+    } else if (btn.dataset.co === "restore") {
+      if (!confirm("Restore " + name + "? It gets a fresh 7-day warning period. Subscribe it, extend its trial or make it complimentary to keep it.")) return;
+      await api("/admin/companies/" + id + "/restore", { method: "POST", body: {} });
+    } else if (btn.dataset.co === "purge") {
+      const typed = prompt("PERMANENTLY DELETE " + name + "?\n\nThis erases all of its records, uploaded files and any member accounts that belong to nothing else. It cannot be undone.\n\nType the company name exactly to confirm:", "");
+      if (typed === null) return;
+      const { data } = await api("/admin/companies/" + id + "/purge", { method: "POST", body: { confirm: typed } });
+      alert("Deleted for good: " + data.files_deleted + " file(s), " + data.users_deleted + " account(s).");
     } else if (btn.dataset.co === "comp" || btn.dataset.co === "uncomp") {
       const on = btn.dataset.co === "comp";
       if (!confirm(on ? "Make " + name + " a complimentary (test) account? It will have no trial and no paywall, and no trial emails." : "Remove complimentary status from " + name + "?")) return;

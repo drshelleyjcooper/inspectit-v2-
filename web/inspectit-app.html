@@ -83,6 +83,9 @@
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
   .hidden { display: none !important; }
   .perm-hidden { display: none !important; }
+  .paused-banner { margin: 12px 16px; padding: 12px 14px; border-radius: 8px;
+    background: #fff6e5; color: #6b4100; border: 1px solid #f0c674; font-size: .9rem; line-height: 1.45; }
+  .paused-banner a { color: #6b4100; font-weight: 600; }
 
   /* ---------- brand mark ---------- */
   .logo { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; }
@@ -899,6 +902,47 @@ function renderPermWarning() {
     "server. Open Users & roles \u2192 Server details to see what it sent.";
 }
 
+/* Paused account (trial over, not subscribed): the server keeps answering
+   reads but refuses every change with 402, as the Terms promise ("You can
+   still sign in and view your organization's records, but you cannot add or
+   change anything"). The app mirrors that: view and print only. */
+function appPaused() {
+  const c = cloudCfg();
+  return !!(c && c.refresh && (c.accessState === "suspended" || c.accessState === "expired"));
+}
+
+function renderPausedBanner() {
+  let el = $("pausedBanner");
+  if (!appPaused()) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "pausedBanner";
+    el.className = "paused-banner";
+    el.setAttribute("role", "status");
+    const host = document.querySelector("#screen-app .content");
+    if (!host) return;
+    host.insertBefore(el, host.firstChild);
+  }
+  const c = cloudCfg();
+  const keep = c.deleteAt ? new Date(c.deleteAt) : null;
+  const when = keep && !isNaN(keep) && keep > new Date()
+    ? " Your records are kept until " + keep.toLocaleDateString(undefined,
+        { month: "long", day: "numeric", year: "numeric" }) + "."
+    : "";
+  el.textContent = "";
+  const b = document.createElement("strong");
+  b.textContent = "Your account is paused. ";
+  el.appendChild(b);
+  el.appendChild(document.createTextNode(
+    "Your free trial has ended, so the account is read-only: you can view and print " +
+    "your records, but you can't add or change anything until you subscribe." + when + " "));
+  const a = document.createElement("a");
+  a.href = (c.api || CLOUD_DEFAULT_API || "https://inspectit.app") + "/#pricing";
+  a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "See plans";
+  el.appendChild(a);
+}
+
 /* Union across every role held. The server's own blob wins when it sent one. */
 function permSet() {
   const c = cloudCfg();
@@ -917,6 +961,7 @@ function permSet() {
 
 /* can("vehicle_repairs", "edit") */
 function can(module, action) {
+  if (appPaused() && action !== "view" && action !== "print") return false;
   if (!permsActive()) return true;
   const acts = permSet()[module];
   if (!acts) return false;
@@ -1067,6 +1112,7 @@ function blockedCombination(heldIds, targetIds) {
 function applyPerms(root) {
   const scope = root || document;
   renderPermWarning();
+  renderPausedBanner();
   scope.querySelectorAll("[data-perm]").forEach(el => {
     const spec = el.getAttribute("data-perm").split(":");
     gateEl(el, can(spec[0], spec[1] || "view"), el.getAttribute("data-perm-mode"));
@@ -1147,6 +1193,8 @@ async function permsRefresh() {
     const grants = permReadGrants(m);
     if (grants) cur.grants = grants;
     cur.companyName = m.company_name || cur.companyName;
+    cur.accessState = m.access || null;
+    cur.deleteAt = m.delete_at || null;
     cloudSaveCfg(cur);
     applyPerms();
   } catch (_) { /* offline — keep the cached roles */ }
@@ -1284,7 +1332,9 @@ function cloudMarkDirty(fullKey) {
    that disagreed with the server (spec §11). Server-applied data
    (cloudApplying) and local-only keys are never gated. */
 function permWriteAllowed(fullKey) {
-  if (cloudApplying || !permsActive()) return true;
+  if (cloudApplying) return true;
+  if (appPaused()) return !CLOUD_NAME_BY_FULL[fullKey];
+  if (!permsActive()) return true;
   const name = CLOUD_NAME_BY_FULL[fullKey];
   if (!name) return true;
   const mod = CLOUD_MODULE_BY_NAME[name];
@@ -1296,7 +1346,11 @@ function permRefuseWrite(fullKey) {
   const now = Date.now();
   if (now - permRefuseToastAt > 2500) {
     permRefuseToastAt = now;
-    try { toast("Your role is view-only here — that change wasn't saved."); } catch (_) {}
+    try {
+      toast(appPaused()
+        ? "Your account is paused, so it's read-only — that change wasn't saved."
+        : "Your role is view-only here — that change wasn't saved.");
+    } catch (_) {}
   }
   /* Whatever the caller changed in memory, storage still holds the old
      state; redraw from storage so the screen agrees with it. */
@@ -1407,6 +1461,24 @@ async function cloudFlush() {
         const cur = cloudCfg(); delete cur.pending[name]; cloudSaveCfg(cur);
         pulledAny = true;
         toast("Updated from another device — showing the latest version.");
+      } else if (r.status === 402) {
+        /* Paused since the last /me: switch to read-only, drop the change and
+           show the server copy, as for a 403 below. */
+        const cur = cloudCfg();
+        delete cur.pending[name];
+        if (!appPaused()) cur.accessState = "suspended";
+        cloudSaveCfg(cur);
+        try {
+          const g = await cloudFetch("/companies/" + c.company + "/collections/" + name, {});
+          if (g.status === 200) {
+            const out = await g.json();
+            cloudApplyServer(name, out.data, out.updated_at);
+            pulledAny = true;
+          }
+        } catch (_) { /* offline — the next pull will reconcile */ }
+        toast("Your account is paused, so it's read-only — that change wasn't saved.");
+        applyPerms();
+        permsRefresh();
       } else if (r.status === 403) {
         /* The server refused the change (no edit, or a delete without
            delete). Until 2026-09-09 this just dropped the pending flag and
@@ -1509,6 +1581,7 @@ async function cloudSignIn(api, email, password) {
                  roles: permReadRoles(m), permissions: permReadBlob(m),
                  canGrantViewers: typeof m.can_grant_viewers === "boolean" ? m.can_grant_viewers : undefined,
                  grants: permReadGrants(m) || undefined,
+                 accessState: m.access || null, deleteAt: m.delete_at || null,
                  meta: {}, pending: {} });
   await cloudSyncNow(true);
 }
@@ -1543,6 +1616,12 @@ function renderCloudStatus() {
   }
   const n = Object.keys(c.pending || {}).length;
   const when = c.lastSync ? new Date(c.lastSync).toLocaleString() : "not yet";
+  if (appPaused()) {
+    el.textContent = "Cloud sync: account paused (read-only) · " + (c.companyName || c.email)
+      + " · Last sync: " + when;
+    el.className = "backup-note warn";
+    return;
+  }
   el.textContent = "Cloud sync: on (" + (c.companyName || c.email) + ") · Last sync: " + when
     + (n ? " · " + n + " change" + (n > 1 ? "s" : "") + " waiting" : "");
   el.className = "backup-note" + (n ? " warn" : "");
@@ -1844,21 +1923,24 @@ let pendingPhoto = null;    // dataURL staged while editing
 function renderHome() {
   const p = getProfile();
   const hasProfile = !!p;
-  if (!hasProfile) profileMode = "edit";
+  const paused = appPaused();      // read-only: show the profile, never the form
+  if (paused) profileMode = "view";
+  else if (!hasProfile) profileMode = "edit";
 
   $("setupNote").classList.toggle("hidden", hasProfile || profileMode !== "edit");
   $("profileView").classList.toggle("hidden", profileMode === "edit");
   $("profileForm").classList.toggle("hidden", profileMode !== "edit");
   // Edit-profile button is redundant while the form is open
-  $("btnEditProfile").classList.toggle("hidden", profileMode === "edit");
+  $("btnEditProfile").classList.toggle("hidden", profileMode === "edit" || paused);
 
-  if (profileMode === "view" && p) {
-    $("dispName").textContent  = p.companyName || "—";
-    $("dispAgent").textContent = p.supervisingAgent || "—";
-    $("dispId").textContent    = p.companyIdentifier || "—";
+  if (profileMode === "view" && (p || paused)) {
+    const v = p || {};
+    $("dispName").textContent  = v.companyName || "—";
+    $("dispAgent").textContent = v.supervisingAgent || "—";
+    $("dispId").textContent    = v.companyIdentifier || "—";
     const ph = $("dispPhoto");
-    if (p.photo) { ph.innerHTML = `<img src="${p.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">`; }
-    else { ph.textContent = initials(p.companyName); }
+    if (v.photo) { ph.innerHTML = `<img src="${v.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:14px;">`; }
+    else { ph.textContent = initials(v.companyName || ""); }
   } else {
     // populate form
     $("fName").value  = p ? (p.companyName || "") : "";
@@ -2062,6 +2144,10 @@ $("btnImport").addEventListener("click", () => {
     const err = $("bkErr");
     const f = $("bkFile").files[0];
     if (!f) { err.textContent = "Please choose a backup file first."; return; }
+    if (appPaused()) {
+      err.textContent = "Your account is paused, so it's read-only. Subscribe to restore a backup.";
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
       let payload;
@@ -2788,7 +2874,7 @@ async function renderUsersPanel() {
     const roles = roleLabels(m, rmap);
     const isMe = email && email === mine;
     const heldIds = roles.map(r => roleKey(r)).filter(Boolean);
-    const editable = !isMe && canManageMember(heldIds);
+    const editable = !isMe && !appPaused() && canManageMember(heldIds);
     return `<li>
       <div class="uavatar">${esc(initials(name))}</div>
       <div class="uinfo">
@@ -2823,12 +2909,12 @@ async function renderUsersPanel() {
       ${inviteTokenFor(iEmail, i.id) || i.token ? `<button class="rm" data-copy="${
           esc(inviteTokenFor(iEmail, i.id) || i.token)}" title="Copy the invitation link"
           aria-label="Copy the invitation link for ${esc(iEmail)}">&#128279;</button>` : ""}
-      <button class="rm" data-revoke="${esc(i.id)}" data-email="${esc(iEmail)}" title="Cancel invitation"
-        aria-label="Cancel the invitation to ${esc(iEmail)}">✕</button>
+      ${appPaused() ? "" : `<button class="rm" data-revoke="${esc(i.id)}" data-email="${esc(iEmail)}" title="Cancel invitation"
+        aria-label="Cancel the invitation to ${esc(iEmail)}">✕</button>`}
     </li>`;
   }).join("");
 
-  const grantable = grantableRoleIds();
+  const grantable = appPaused() ? [] : grantableRoleIds();
   const scopeNote = domains
     ? `<p class="pc-meta" style="margin:0 0 10px;">Showing the ${
         domains.map(d => d + " roles").join(" and ")} you manage. Managers and
@@ -2856,7 +2942,9 @@ async function renderUsersPanel() {
          <button class="primary" id="inviteBtn" style="height:42px;">Invite</button>
        </div>
        <p class="pc-meta" id="roleBlurb">${esc(ROLE_PRESETS[grantable[grantable.length - 1]].blurb)}</p>`
-      : `<p class="pc-meta">Your role can't add users. Ask an administrator.</p>`}`;
+      : appPaused()
+        ? `<p class="pc-meta">Your account is paused, so you can't add users until you subscribe.</p>`
+        : `<p class="pc-meta">Your role can't add users. Ask an administrator.</p>`}`;
 
   renderApiDiag(invites);
 

@@ -6,8 +6,8 @@ Access state per company (see migrations/006, 007):
     trialing    trial_ends_at in the future
     grace       trial over, within TRIAL_GRACE_DAYS: full access, nudged to subscribe
     subscribed  subscribed_at set (paid): always allowed
-    suspended   grace over, records kept DATA_RETENTION_DAYS: company routes answer 402
-    expired     retention over: still 402; records are due for deletion
+    suspended   grace over, records kept DATA_RETENTION_DAYS: read-only, changes answer 402
+    expired     retention over: still read-only; records are due for deletion
 
 Emails are exactly-once across worker processes: each cycle first *claims* the
 companies it will email with an atomic UPDATE ... RETURNING on the marker
@@ -20,6 +20,7 @@ import logging
 
 from . import config, mailer
 from .db import audit, get_pool
+from .purge import purge_company
 
 log = logging.getLogger("inspectit")
 
@@ -144,6 +145,7 @@ def run_trial_cycle() -> dict:
                 name, c["name"], timeline(c["trial_ends_at"])["delete_at"], link),
             "deletion_warning_sent_at")
         purged = 0
+        due_ids = []
         if config.RETENTION_PURGE_ENABLED:
             # Only companies whose warning email went out at least
             # RETENTION_WARNING_DAYS ago are ever removed, so a customer always
@@ -163,11 +165,32 @@ def run_trial_cycle() -> dict:
                       {"event": "retention_expired"})
                 log.warning("retention: company %s (%s) removed", g["id"], g["name"])
             purged = len(gone)
-    if reminders or ended or paused or warned or purged:
-        log.info("trial cycle: %d reminder(s), %d ended, %d paused, %d warned, %d removed",
-                 n_rem, n_end, n_pause, n_warn, purged)
+            # Stage 2: removed companies whose hold period is over. Every
+            # condition is re-checked here, so a company that subscribed, was
+            # extended or made complimentary in the meantime is never touched.
+            due_ids = [r["id"] for r in conn.execute(
+                """SELECT id FROM companies
+                   WHERE deleted_at IS NOT NULL AND subscribed_at IS NULL
+                     AND NOT complimentary AND trial_ends_at IS NOT NULL
+                     AND deleted_at <= now() - make_interval(days => %s)
+                     AND deletion_warning_sent_at IS NOT NULL
+                     AND deletion_warning_sent_at <= now() - make_interval(days => %s)
+                     AND trial_ends_at + make_interval(days => %s) <= now()
+                   ORDER BY deleted_at LIMIT 5""",
+                (config.HARD_PURGE_DELAY_DAYS, config.RETENTION_WARNING_DAYS,
+                 config.TRIAL_GRACE_DAYS + config.DATA_RETENTION_DAYS)).fetchall()]
+    hard = 0
+    for cid in due_ids:
+        try:
+            purge_company(cid, "retention", require_removed=True)
+            hard += 1
+        except Exception as exc:          # one bad company must not stop the rest
+            log.error("permanent deletion failed for company %s: %s", cid, exc)
+    if reminders or ended or paused or warned or purged or hard:
+        log.info("trial cycle: %d reminder(s), %d ended, %d paused, %d warned, %d removed, %d deleted permanently",
+                 n_rem, n_end, n_pause, n_warn, purged, hard)
     return {"reminders": n_rem, "ended": n_end, "paused": n_pause,
-            "warned": n_warn, "removed": purged}
+            "warned": n_warn, "removed": purged, "deleted_permanently": hard}
 
 
 async def trial_loop():

@@ -119,7 +119,7 @@ INVITE_EMAIL_WINDOW_S = int(os.environ.get("INVITE_EMAIL_WINDOW_S", "3600"))
 TRIAL_REMINDER_DAYS = int(os.environ.get("TRIAL_REMINDER_DAYS", "7"))
 TRIAL_CHECK_INTERVAL_S = int(os.environ.get("TRIAL_CHECK_INTERVAL_S", "3600"))
 # After the trial ends: full access for TRIAL_GRACE_DAYS, then the account is
-# paused (402) and its records are kept DATA_RETENTION_DAYS. A final warning
+# paused (read-only: changes answer 402) and its records are kept DATA_RETENTION_DAYS. A final warning
 # goes out RETENTION_WARNING_DAYS before deletion. Deletion itself only runs
 # when RETENTION_PURGE_ENABLED=1 (default OFF: it removes a customer's access
 # to their records, so switch it on deliberately).
@@ -127,6 +127,10 @@ TRIAL_GRACE_DAYS = int(os.environ.get("TRIAL_GRACE_DAYS", "7"))
 DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
 RETENTION_WARNING_DAYS = int(os.environ.get("RETENTION_WARNING_DAYS", "7"))
 RETENTION_PURGE_ENABLED = os.environ.get("RETENTION_PURGE_ENABLED", "") == "1"
+# A company removed by the retention step is first only hidden (restorable by a
+# platform admin). This many days later it is permanently deleted: database
+# rows, uploaded files, and members who belonged to nothing else.
+HARD_PURGE_DELAY_DAYS = int(os.environ.get("HARD_PURGE_DELAY_DAYS", "7"))
 # Length of the free trial granted by POST /auth/trial-signup.
 TRIAL_DAYS = int(os.environ.get("TRIAL_DAYS", "30"))
 

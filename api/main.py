@@ -143,6 +143,16 @@ def reset_password_page():
     return _account_page("reset-password.html")
 
 
+@app.get("/terms")
+def terms_page():
+    return FileResponse(SITE_DIR / "terms.html", media_type="text/html", headers=_NO_CACHE)
+
+
+@app.get("/privacy")
+def privacy_page():
+    return FileResponse(SITE_DIR / "privacy.html", media_type="text/html", headers=_NO_CACHE)
+
+
 @app.get("/web/inspectit-app.html")
 def app_shell():
     return FileResponse(config.PROJECT_ROOT / "web" / "inspectit-app.html",

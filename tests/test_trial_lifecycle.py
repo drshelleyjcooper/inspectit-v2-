@@ -51,6 +51,13 @@ def _trial_company(client, days_left):
             "hdr": {"Authorization": "Bearer " + d["access_token"]}, "tag": t}
 
 
+def _write(client, c):
+    """Status of a harmless change (renaming the company to its own name)."""
+    name = client.get(f"/companies/{c['cid']}", headers=c["hdr"]).json().get("name", "x")
+    return client.patch(f"/companies/{c['cid']}", headers=c["hdr"],
+                        json={"name": name}).status_code
+
+
 def set_trial_end(cid, days_left):
     from api.db import get_pool
     with get_pool().connection() as conn:
@@ -99,12 +106,14 @@ def test_active_trial_has_access_and_suspended_does_not(client):
     assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 200
     me = client.get("/me", headers=c["hdr"]).json()["memberships"][0]
     assert me["access"] == "grace" and me["grace_ends_at"]
-    set_trial_end(c["cid"], -8)                       # grace over: paused
-    r = client.get(f"/companies/{c['cid']}/members", headers=c["hdr"])
+    set_trial_end(c["cid"], -8)                       # grace over: paused (read-only)
+    assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 200
+    r = client.patch(f"/companies/{c['cid']}", headers=c["hdr"], json={"name": "New name"})
     assert r.status_code == 402
-    assert "trial has ended" in r.json()["detail"]
+    assert "trial has ended" in r.json()["detail"] and "view" in r.json()["detail"]
     me = client.get("/me", headers=c["hdr"]).json()["memberships"][0]
     assert me["access"] == "suspended" and me["subscribed"] is False   # /me still works
+    assert me["delete_at"] and me["delete_at"] > me["grace_ends_at"]
 
 
 def test_company_without_trial_is_never_suspended(client):
@@ -118,15 +127,14 @@ def test_company_without_trial_is_never_suspended(client):
 
 def test_subscribing_lifts_suspension_and_unsubscribing_restores_it(client, platform_admin):
     c = _trial_company(client, -9)
-    url = f"/companies/{c['cid']}/members"
-    assert client.get(url, headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
     r = client.patch(f"/admin/companies/{c['cid']}/subscription", headers=platform_admin,
                      json={"active": True})
     assert r.status_code == 200 and r.json()["access"] == "subscribed"
-    assert client.get(url, headers=c["hdr"]).status_code == 200
+    assert _write(client, c) == 200
     client.patch(f"/admin/companies/{c['cid']}/subscription", headers=platform_admin,
                  json={"active": False})
-    assert client.get(url, headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
 
 
 def test_extend_trial_lifts_suspension_and_rearms_emails(client, platform_admin, outbox):
@@ -134,11 +142,11 @@ def test_extend_trial_lifts_suspension_and_rearms_emails(client, platform_admin,
     _run()
     assert len(_to(outbox, c["email"])) == 1 and "ended" in _to(outbox, c["email"])[0]["subject"]
     set_trial_end(c["cid"], -9)
-    assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
     r = client.post(f"/admin/companies/{c['cid']}/extend-trial", headers=platform_admin,
                     json={"days": 14})
     assert r.status_code == 200 and r.json()["access"] == "trialing"
-    assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 200
+    assert _write(client, c) == 200
     assert client.post(f"/admin/companies/{c['cid']}/extend-trial", headers=platform_admin,
                        json={"days": 0}).status_code == 422
     assert client.post(f"/admin/companies/{uuid.uuid4()}/extend-trial", headers=platform_admin,
@@ -280,7 +288,7 @@ def test_nothing_is_removed_unless_purge_switch_is_on(client, outbox):
     res = _run()
     assert res["removed"] == 0 and not _is_deleted(c["cid"])
     assert client.get("/me", headers=c["hdr"]).json()["memberships"][0]["access"] == "expired"
-    assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
 
 
 def test_purge_removes_only_warned_expired_unsubscribed_companies(client, outbox, monkeypatch,
@@ -394,16 +402,15 @@ def test_complimentary_needs_a_new_company(client, platform_admin):
 
 def test_toggle_complimentary_on_an_existing_company(client, platform_admin):
     c = _trial_company(client, -9)                    # paused
-    url = f"/companies/{c['cid']}/members"
-    assert client.get(url, headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
     r = client.patch(f"/admin/companies/{c['cid']}/complimentary", headers=platform_admin,
                      json={"active": True})
     assert r.status_code == 200 and r.json()["access"] == "complimentary"
-    assert client.get(url, headers=c["hdr"]).status_code == 200
+    assert _write(client, c) == 200
     r = client.patch(f"/admin/companies/{c['cid']}/complimentary", headers=platform_admin,
                      json={"active": False})
     assert r.json()["access"] == "suspended"
-    assert client.get(url, headers=c["hdr"]).status_code == 402
+    assert _write(client, c) == 402
     assert client.patch(f"/admin/companies/{uuid.uuid4()}/complimentary", headers=platform_admin,
                         json={"active": True}).status_code == 404
     assert client.patch(f"/admin/companies/{c['cid']}/complimentary", headers=c["hdr"],
@@ -436,3 +443,55 @@ def test_stats_count_complimentary_and_exclude_them_from_trials(client, platform
     after = client.get("/admin/stats", headers=platform_admin).json()["totals"]
     assert after["trials_active"] == before["trials_active"]
     assert after["complimentary"] == before["complimentary"] + 1
+
+
+# ---------- paused = read-only (Terms: "You can still sign in and view ...") ----------
+
+def test_paused_account_can_view_records_but_not_change_them(client):
+    c = _trial_company(client, 10)
+    base = f"/companies/{c['cid']}"
+    vehicles = [{"id": "v1", "vehicleId": "VAN-1", "type": "van"}]
+    r = client.put(f"{base}/collections/vehicles", headers=c["hdr"], json={"data": vehicles})
+    assert r.status_code == 200, r.text
+
+    for days in (-8, -40):                            # suspended, then expired (not yet removed)
+        set_trial_end(c["cid"], days)
+        # reading still works
+        assert client.get(base, headers=c["hdr"]).status_code == 200
+        assert client.get(f"{base}/members", headers=c["hdr"]).status_code == 200
+        idx = client.get(f"{base}/collections", headers=c["hdr"])
+        assert idx.status_code == 200 and "vehicles" in [e["key"] for e in idx.json()]
+        g = client.get(f"{base}/collections/vehicles", headers=c["hdr"])
+        assert g.status_code == 200 and g.json()["data"] == vehicles
+        # every kind of change is refused
+        assert client.put(f"{base}/collections/vehicles", headers=c["hdr"],
+                          json={"data": []}).status_code == 402
+        assert client.patch(base, headers=c["hdr"], json={"name": "Renamed"}).status_code == 402
+        assert client.post(f"{base}/invitations", headers=c["hdr"],
+                           json={"email": f"new-{c['tag']}@example.com",
+                                 "role_ids": [str(uuid.uuid4())]}).status_code == 402
+        # and nothing changed
+        assert client.get(f"{base}/collections/vehicles",
+                          headers=c["hdr"]).json()["data"] == vehicles
+
+
+def test_paused_member_can_still_turn_off_or_reset_their_calendar_link(client):
+    c = _trial_company(client, 10)
+    url = f"/companies/{c['cid']}/calendar"
+    r = client.put(url, headers=c["hdr"], json={"prefs": None})
+    assert r.status_code == 200, r.text
+    set_trial_end(c["cid"], -8)
+    assert client.get(url, headers=c["hdr"]).status_code == 200
+    assert client.put(url, headers=c["hdr"], json={"prefs": None}).status_code == 402
+    assert client.post(url + "/reset", headers=c["hdr"]).status_code == 200
+    assert client.delete(url, headers=c["hdr"]).status_code in (200, 204)
+
+
+def test_paused_company_still_hides_other_tenants_and_removed_companies(client):
+    c = _trial_company(client, -8)
+    other = _trial_company(client, 10)
+    assert client.get(f"/companies/{other['cid']}/members", headers=c["hdr"]).status_code == 403
+    from api.db import get_pool
+    with get_pool().connection() as conn:
+        conn.execute("UPDATE companies SET deleted_at = now() WHERE id = %s", (c["cid"],))
+    assert client.get(f"/companies/{c['cid']}/members", headers=c["hdr"]).status_code == 404

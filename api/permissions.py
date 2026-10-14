@@ -120,7 +120,27 @@ def platform_admin(user: dict = Depends(current_user)) -> dict:
     return user
 
 
-def company_member(company_id: str, user: dict = Depends(current_user)) -> AuthContext:
+# A paused account (trial over, not subscribed) is read-only: members can
+# still sign in and view records, as the Terms promise, but every request
+# that would add, change or delete something answers 402 (see
+# company_member_paused_ok for the narrow exceptions).
+READ_METHODS = ("GET", "HEAD", "OPTIONS")
+
+
+def company_member(company_id: str, request: Request,
+                   user: dict = Depends(current_user)) -> AuthContext:
+    return _member(company_id, user, allow_paused=request.method in READ_METHODS)
+
+
+def company_member_paused_ok(company_id: str,
+                             user: dict = Depends(current_user)) -> AuthContext:
+    """Like company_member, but also lets a paused account through for writes.
+    Only for actions that protect the member and change no records, such as
+    turning off or resetting their private calendar link."""
+    return _member(company_id, user, allow_paused=True)
+
+
+def _member(company_id: str, user: dict, allow_paused: bool) -> AuthContext:
     try:
         uuid.UUID(company_id)
     except ValueError:
@@ -142,10 +162,10 @@ def company_member(company_id: str, user: dict = Depends(current_user)) -> AuthC
         if co:
             state = access_state(co["trial_ends_at"], co["subscribed_at"],
                                  complimentary=co["complimentary"])
-            if blocked(state):
+            if blocked(state) and not allow_paused:
                 raise HTTPException(
                     402, "Your free trial has ended and the account is paused. "
-                         "Subscribe to keep using Inspectit.app.")
+                         "You can still view your records; subscribe to make changes.")
         roles = conn.execute(
             """SELECT r.id, r.name, r.scope, r.permissions,
                       r.grants, r.viewer_grants
