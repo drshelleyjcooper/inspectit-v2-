@@ -274,3 +274,30 @@ main:focus{outline:none}
 .account__card h1{font-size:clamp(1.8rem,4vw,2.4rem)}
 .account__note{margin:1.4em 0 0}
 .account .btn{text-decoration:none}
+
+/* Footer links */
+.site-footer__links{display:flex;flex-wrap:wrap;gap:4px 20px}
+
+/* Legal pages (Terms of Service, Privacy Policy) */
+.legal{padding:clamp(32px,6vw,80px) 20px;background:var(--tint)}
+.legal__doc{max-width:780px;margin:0 auto;background:#fff;border-radius:var(--radius);padding:clamp(24px,5vw,56px);box-shadow:0 20px 40px rgba(11,26,54,.08)}
+.legal__doc h1{font-size:clamp(2rem,5vw,2.8rem);margin-bottom:.2em}
+.legal__doc h2{font-size:1.5rem;margin:1.6em 0 .5em;scroll-margin-top:calc(var(--header-h) + 16px)}
+.legal__doc h3{font-size:1.15rem;margin:1.2em 0 .4em;font-family:var(--sans);font-weight:600}
+.legal__doc p,.legal__doc li{max-width:68ch}
+.legal__doc ul,.legal__doc ol{padding-left:1.3em;margin:0 0 1em}
+.legal__doc li{margin-bottom:.5em}
+.legal__updated{color:var(--muted);margin:0 0 1.2em}
+.legal__lead{font-size:1.2rem}
+.legal__summary{background:var(--tint);border-left:4px solid var(--blue);border-radius:10px;padding:18px 22px;margin:1.4em 0}
+.legal__summary h2{margin:0 0 .4em;font-size:1.2rem}
+.legal__summary ul{margin:0}
+.legal__toc{margin:1.4em 0 2em}
+.legal__toc h2{font-size:1.15rem;margin:0 0 .4em}
+.legal__toc ol{columns:2;column-gap:32px;margin:0}
+.legal__toc a{display:inline-block;padding:3px 0}
+@media (max-width:640px){.legal__toc ol{columns:1}}
+.legal__other{margin-top:2.4em;padding-top:1.4em;border-top:1px solid var(--line)}
+mark.todo{background:#ffe27a;color:#000;padding:0 4px;border-radius:3px;font-weight:600}
+
+.pricing__note{max-width:60ch;font-size:1.1rem;background:var(--cream);border:1px solid var(--line);border-radius:var(--radius);padding:20px 24px;margin:0}
