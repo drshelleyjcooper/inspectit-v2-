@@ -49,6 +49,10 @@ class LocalDiskStorage:
     def url_for(self, key: str, expires_s: int = 900) -> str:
         return f"file://{self.root / key}"
 
+    def read(self, key: str) -> bytes:
+        """Raises FileNotFoundError if the file isn't there."""
+        return (self.root / key).read_bytes()
+
 
 class SpacesStorage:
     """DigitalOcean Spaces via the S3 API (boto3). Used when STORAGE_BACKEND=s3."""
@@ -71,6 +75,14 @@ class SpacesStorage:
                                ContentType=mime, ACL="private")
         return key
 
+    def read(self, key: str) -> bytes:
+        """Raises FileNotFoundError if the object isn't there."""
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=key)
+        except self.client.exceptions.NoSuchKey:
+            raise FileNotFoundError(key)
+        return obj["Body"].read()
+
     def url_for(self, key: str, expires_s: int = 900) -> str:
         return self.client.generate_presigned_url(
             "get_object", Params={"Bucket": self.bucket, "Key": key},
@@ -91,14 +103,17 @@ def get_storage():
 
 
 def store_file(conn, company_id, uploaded_by, filename, mime, data: bytes,
-               kind=None, attached_to_type=None, attached_to_id=None) -> str:
+               kind=None, attached_to_type=None, attached_to_id=None,
+               sha256=None) -> str:
     """Save bytes + insert a files row. Returns the file id."""
     key = get_storage().save(str(company_id), mime, data)
     row = conn.execute(
         """INSERT INTO files (company_id, uploaded_by, storage_key, filename,
-                              mime, size_bytes, kind, attached_to_type, attached_to_id)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                              mime, size_bytes, kind, attached_to_type, attached_to_id,
+                              sha256)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (company_id, uploaded_by, key, filename or "file", mime, len(data),
-         kind or MIME_KIND.get(mime, "bin"), attached_to_type, attached_to_id),
+         kind or MIME_KIND.get(mime, "bin"), attached_to_type, attached_to_id,
+         sha256),
     ).fetchone()
     return str(row["id"])

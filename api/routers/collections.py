@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from ..attachments import externalize
 from ..db import audit, get_pool
 from ..permissions import AuthContext, company_member
 
@@ -220,6 +221,9 @@ def put_collection(key: str, body: PutCollectionIn,
                     403, f"Requires {KEY_MODULE[key]}:delete — this write "
                          f"would remove {removed} record(s), and only "
                          "Company Administrator may delete (§4.1)")
+        # Photos/PDFs go to file storage; the stored record keeps links.
+        data, moved = externalize(conn, ctx.company_id, ctx.user["id"],
+                                  body.data)
         row = conn.execute(
             """INSERT INTO app_collections (company_id, key, data, updated_by)
                VALUES (%s, %s, %s, %s)
@@ -227,11 +231,19 @@ def put_collection(key: str, body: PutCollectionIn,
                DO UPDATE SET data = EXCLUDED.data,
                              updated_by = EXCLUDED.updated_by
                RETURNING updated_at""",
-            (ctx.company_id, key, Jsonb(body.data), ctx.user["id"]),
+            (ctx.company_id, key, Jsonb(data), ctx.user["id"]),
         ).fetchone()
+        meta = {"key": key, "bytes": size}
+        if moved["moved"]:
+            meta["files_moved"] = moved["moved"]
         audit(conn, ctx.company_id, ctx.user["id"], "update", "collection",
-              None, {"key": key, "bytes": size})
+              None, meta)
         if removed:
             audit(conn, ctx.company_id, ctx.user["id"], "delete", "collection",
                   None, {"key": key, "removed": removed})
-    return {"key": key, "updated_at": row["updated_at"].isoformat()}
+    out = {"key": key, "updated_at": row["updated_at"].isoformat()}
+    if moved["moved"]:
+        # The app swaps its local copy for this one, so it stops holding
+        # (and re-sending) the embedded files.
+        out["data"] = data
+    return out

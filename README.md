@@ -297,7 +297,10 @@ double-import (409 unless `?force=true`).
 See `BACKEND-ANALYSIS.md` §6 for the full runbook with app spec YAML. Summary:
 
 1. **Managed PostgreSQL** — create cluster; set `DATABASE_URL`
-2. **Spaces** — create bucket; set `STORAGE_BACKEND=s3` + `SPACES_*` vars
+2. **Spaces** — create bucket; set `STORAGE_BACKEND=s3` + `SPACES_*` vars,
+   and `FILE_LINK_SECRET` (signs the photo/PDF links saved in records —
+   changing it later breaks every saved link). Moving files that were stored
+   in the database before this: see `SPACES-MIGRATION.md`.
 3. **App Platform (API)** — run command:
    `uvicorn api.main:app --host 0.0.0.0 --port $PORT --no-access-log`;
    set `APP_ENV=production`, `JWT_SECRET`, `ALLOWED_ORIGINS`

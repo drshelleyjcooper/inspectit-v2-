@@ -24,7 +24,8 @@ from .trial import trial_loop
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 from .routers import (admin, assignments, auth, calendar, collections,
-                      companies, entities, importer, me, members, public)
+                      companies, entities, files, importer, me, members,
+                      public)
 
 
 log = logging.getLogger("inspectit")
@@ -83,6 +84,7 @@ app.include_router(collections.router)
 app.include_router(admin.router)
 app.include_router(public.router)
 app.include_router(calendar.router)
+app.include_router(files.router)
 
 
 @app.get("/health")
