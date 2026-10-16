@@ -9,3 +9,5 @@ __pycache__/
 .pytest_cache/
 .dev-calendar-test-account
 .DS_Store
+.filestore_copy/
+.dev-paused-test-account

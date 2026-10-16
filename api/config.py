@@ -94,6 +94,10 @@ JWT_SECRET = _jwt_secret()
 # break everyone's calendar link (and vice versa). Changing it invalidates all
 # calendar links.
 CALENDAR_SECRET = os.environ.get("CALENDAR_SECRET", "") or JWT_SECRET
+# Photo/PDF links saved in records (/files/<id>/<sig>, api/attachments.py) are
+# signed with this key. Defaults to JWT_SECRET; set it separately so rotating
+# the session key doesn't break every stored link. Changing it breaks them all.
+FILE_LINK_SECRET = os.environ.get("FILE_LINK_SECRET", "") or JWT_SECRET
 # How long a built feed is reused before it is rebuilt from the synced data,
 # and how often one link may be fetched (calendar apps poll; this caps a
 # misconfigured client or a leaked link).

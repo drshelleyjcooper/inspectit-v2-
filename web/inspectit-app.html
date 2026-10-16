@@ -1395,11 +1395,20 @@ async function cloudFlush() {
                                  { method: "PUT", body });
       if (r.status === 200) {
         const out = await r.json();
+        /* Changed again while the PUT was in flight: leave it pending so
+           that change is pushed too. */
+        const unchanged = store.get(CLOUD_FULLKEY[name]) === raw;
         const cur = cloudCfg();
         cur.meta = cur.meta || {}; cur.meta[name] = out.updated_at;
-        delete cur.pending[name];
+        if (unchanged) delete cur.pending[name];
         cur.lastSync = new Date().toISOString();
         cloudSaveCfg(cur);
+        /* The server moved photos/PDFs into file storage and sent back the
+           record with links in their place. Keep that copy so this browser
+           stops holding (and re-sending) the embedded files. If it changed
+           in flight, the next push gets links for it the same way. */
+        if (out.data !== undefined && unchanged)
+          cloudApplyServer(name, out.data, out.updated_at);
       } else if (r.status === 409) {
         const out = await r.json();
         const d = out.detail || {};

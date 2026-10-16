@@ -44,7 +44,9 @@ add a new numbered file.**
   single source of truth (also mapped in `permissions.MODULE_SUBJECT` and
   `assignments.SUBJECT_MODULE` — keep in sync).
 - Files: binaries never go in the DB. `storage.store_file()` writes bytes
-  (local disk dev / DO Spaces prod) + a `files` row.
+  (local disk dev / DO Spaces prod) + a `files` row. Collection PUTs run
+  `attachments.externalize()`: embedded photo/PDF data URLs become signed
+  `/files/<id>/<sig>` links (see SPACES-MIGRATION.md).
 - Soft deletes (`deleted_at`) everywhere; audit writes via `db.audit()` on
   create/delete/assign/export-ish actions.
 - The importer (`routers/importer.py`) must stay lenient — the app's export
