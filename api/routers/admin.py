@@ -440,7 +440,8 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
         subject, text = mailer.welcome_email(body.name, company_label,
                                              body.role if company_id else None,
                                              setup_link, config.ADMIN_LINK_TTL_MIN)
-        sent = mailer.send_mail(subject, text, None, email)     # sync: the admin is waiting
+        sent = mailer.send_mail(subject, text, None, email,     # sync: the admin is waiting
+                                mailer.copy_to(email))
         out["setup_email_sent"] = bool(sent)
         if not sent:                                            # fall back: hand over the link
             out["setup_link"] = setup_link
