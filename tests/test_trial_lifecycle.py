@@ -17,7 +17,7 @@ def outbox(monkeypatch):
     box = []
     monkeypatch.setattr(config, "RESEND_API_KEY", "re_not_real")   # enables the cycle
     monkeypatch.setattr(mailer, "send_mail",
-                        lambda subject, body, reply_to=None, to=None:
+                        lambda subject, body, reply_to=None, to=None, bcc=None:
                         box.append({"subject": subject, "body": body, "to": to}) or True)
     return box
 
@@ -217,7 +217,7 @@ def test_failed_send_releases_claim_for_retry(client, monkeypatch):
     _run()
     got = []
     monkeypatch.setattr(mailer, "send_mail",
-                        lambda s, b, r=None, to=None: got.append(to) or True)
+                        lambda s, b, r=None, to=None, bcc=None: got.append(to) or True)
     _run()
     assert c["email"] in got                  # retried and delivered
 
