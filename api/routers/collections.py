@@ -20,7 +20,7 @@ and requires module:delete when anything is gone (spec §11).
 import json
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
@@ -160,14 +160,21 @@ class PutCollectionIn(BaseModel):
 
 
 @router.get("/collections")
-def index(ctx: AuthContext = Depends(company_member)):
-    """Sync index: every collection the caller may view, with timestamps."""
+def index(response: Response, ctx: AuthContext = Depends(company_member)):
+    """Sync index: every collection the caller may view, with timestamps.
+    X-Records-Cleared-At: when a platform admin last cleared this company's
+    records; the app drops its local copy once when it sees a new value."""
     with get_pool().connection() as conn:
         rows = conn.execute(
             """SELECT key, updated_at FROM app_collections
                WHERE company_id = %s ORDER BY key""",
             (ctx.company_id,),
         ).fetchall()
+        cleared = conn.execute(
+            "SELECT records_cleared_at FROM companies WHERE id = %s",
+            (ctx.company_id,)).fetchone()
+    if cleared and cleared["records_cleared_at"]:
+        response.headers["X-Records-Cleared-At"] = cleared["records_cleared_at"].isoformat()
     out = []
     for r in rows:
         try:

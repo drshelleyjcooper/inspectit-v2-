@@ -8,6 +8,8 @@ users.is_platform_admin (see permissions.platform_admin).
     GET   /admin/demo-requests            "Schedule a Demo" requests (?status=)
     PATCH /admin/demo-requests/{id}       mark new / contacted / closed
     GET   /admin/companies                companies + member counts
+    GET   /admin/companies/{id}/records   the company's synced collections
+    POST  /admin/companies/{id}/clear-records   delete them (type the exact name)
     GET   /admin/users?q=&limit=&offset=  users + memberships (search by email/name)
     POST  /admin/users                    create user (+ membership, optional new company)
     PATCH /admin/users/{id}               name / disable / platform-admin flag
@@ -280,6 +282,53 @@ def extend_trial(company_id: str, body: ExtendTrialIn,
               {"event": "trial_extended", "days": body.days})
     return {"id": str(cid), "trial_ends_at": row["trial_ends_at"],
             "access": access_state(row["trial_ends_at"], row["subscribed_at"])}
+
+
+@router.get("/companies/{company_id}/records")
+def company_records(company_id: str):
+    """The company's synced collections (key, last change, size), so the admin
+    can see what Clear records would remove."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        if not conn.execute("SELECT 1 FROM companies WHERE id = %s AND deleted_at IS NULL",
+                            (cid,)).fetchone():
+            raise HTTPException(404, "Company not found")
+        rows = conn.execute(
+            """SELECT key, updated_at, pg_column_size(data) AS bytes
+               FROM app_collections WHERE company_id = %s ORDER BY key""",
+            (cid,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+class ClearRecordsIn(BaseModel):
+    confirm_name: str
+
+
+@router.post("/companies/{company_id}/clear-records")
+def clear_records(company_id: str, body: ClearRecordsIn,
+                  admin: dict = Depends(platform_admin)):
+    """Delete every synced collection (vehicles, inspections, company
+    profile, ...) of one company. Members, roles, trial and sign-ins are
+    untouched. For cleaning up records that landed in the wrong company; the
+    caller must type the company's exact name. Stamps records_cleared_at so
+    members' browsers drop their local copy instead of pushing it back."""
+    cid = _uuid(company_id, "Company")
+    with get_pool().connection() as conn:
+        row = conn.execute("SELECT name FROM companies WHERE id = %s AND deleted_at IS NULL",
+                           (cid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Company not found")
+        if body.confirm_name.strip() != row["name"]:
+            raise HTTPException(422, "Type the company's exact name to confirm")
+        keys = [r["key"] for r in conn.execute(
+            "DELETE FROM app_collections WHERE company_id = %s RETURNING key",
+            (cid,)).fetchall()]
+        stamp = conn.execute(
+            "UPDATE companies SET records_cleared_at = now() WHERE id = %s RETURNING records_cleared_at",
+            (cid,)).fetchone()["records_cleared_at"]
+        audit(conn, cid, admin["id"], "delete", "company", cid,
+              {"event": "records_cleared", "keys": sorted(keys)})
+    return {"id": str(cid), "cleared": sorted(keys), "records_cleared_at": stamp}
 
 
 # ---------- users ----------
