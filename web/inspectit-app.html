@@ -1459,6 +1459,19 @@ async function cloudSyncNow(isInitial) {
   const r = await cloudFetch("/companies/" + c.company + "/collections");
   if (!r.ok) throw new Error("couldn't reach the sync service (" + r.status + ")");
   const idx = await r.json();
+  /* A platform admin cleared this company's records (Admin -> Companies ->
+     Clear records). Drop this browser's copy once, or the sync below would
+     push it straight back up. */
+  const cleared = r.headers.get("X-Records-Cleared-At");
+  if (cleared) {
+    const seen = getJSON(RECORDS_CLEARED_KEY, {});
+    if (seen[c.company] !== cleared) {
+      cloudClearLocalData();
+      const cur = cloudCfg(); cur.meta = {}; cur.pending = {}; cloudSaveCfg(cur);
+      seen[c.company] = cleared; setJSON(RECORDS_CLEARED_KEY, seen);
+      isInitial = true;
+    }
+  }
   const server = {}; idx.forEach(e => { server[e.key] = e.updated_at; });
   let pulled = 0;
   for (const name of Object.keys(server)) {
@@ -1511,6 +1524,7 @@ async function cloudLoginRequest(api, path, body) {
    the initial sync kept every local collection the new company's server copy
    lacked (its company profile, for one) and pushed them up to it. */
 const DATA_OWNER_KEY = "inspectit.dataCompany";      // local-only (never synced)
+const RECORDS_CLEARED_KEY = "inspectit.recordsCleared"; // local-only: company id -> clear stamp seen
 
 function cloudLocalHasData() {
   return CLOUD_SYNC_NAMES.some(n => store.get(CLOUD_FULLKEY[n]) != null);

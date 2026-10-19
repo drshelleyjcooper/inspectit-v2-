@@ -151,3 +151,47 @@ def test_admin_page_is_served(client):
     assert r.status_code == 200
     assert "Inspectit admin" in r.text
     assert r.headers.get("cache-control") == "no-cache"
+
+
+def test_clear_company_records(client, admin):
+    tag = uuid.uuid4().hex[:6]
+    t = _signup(client, tag)
+    cid, hdr = t["company_id"], _auth(t["access_token"])
+    for key, data in (("profile", {"companyName": "Someone Else"}),
+                      ("vehicles", [{"id": "v1", "vehicleId": "X-1"}])):
+        r = client.put(f"/companies/{cid}/collections/{key}", json={"data": data}, headers=hdr)
+        assert r.status_code == 200, r.text
+    r = client.get(f"/companies/{cid}/collections", headers=hdr)
+    assert "X-Records-Cleared-At" not in r.headers
+
+    r = client.get(f"/admin/companies/{cid}/records", headers=admin["hdr"])
+    assert r.status_code == 200, r.text
+    assert [x["key"] for x in r.json()] == ["profile", "vehicles"]
+
+    # the company's own admin can't do it; a wrong name is refused
+    assert client.post(f"/admin/companies/{cid}/clear-records",
+                       json={"confirm_name": f"Adm Co {tag}"}, headers=hdr).status_code == 403
+    r = client.post(f"/admin/companies/{cid}/clear-records",
+                    json={"confirm_name": "Adm Co"}, headers=admin["hdr"])
+    assert r.status_code == 422
+    assert len(client.get(f"/companies/{cid}/collections", headers=hdr).json()) == 2
+
+    r = client.post(f"/admin/companies/{cid}/clear-records",
+                    json={"confirm_name": f"Adm Co {tag}"}, headers=admin["hdr"])
+    assert r.status_code == 200, r.text
+    assert r.json()["cleared"] == ["profile", "vehicles"]
+    r = client.get(f"/companies/{cid}/collections", headers=hdr)
+    assert r.json() == []
+    assert r.headers["X-Records-Cleared-At"]
+    # sign-in and membership survive
+    assert client.post("/auth/login", json={"email": f"adm-{tag}@example.com",
+                                            "password": "password123"}).status_code == 200
+    # another company's records are untouched
+    assert client.get(f"/admin/companies/{admin['company_id']}/records",
+                      headers=admin["hdr"]).status_code == 200
+
+
+def test_clear_records_unknown_company(client, admin):
+    r = client.post(f"/admin/companies/{uuid.uuid4()}/clear-records",
+                    json={"confirm_name": "x"}, headers=admin["hdr"])
+    assert r.status_code == 404

@@ -268,15 +268,28 @@ async function loadCompanies() {
       ? '<button class="btn sm" data-co="unsub">Remove subscription</button>'
       : '<button class="btn sm primary" data-co="sub">Mark subscribed</button>')
     + (["trialing", "grace", "suspended", "expired"].includes(c.access) ? ' <button class="btn sm" data-co="extend">Extend trial</button>' : "") + comp(c);
+  const actionsAll = c => actions(c) + ' <button class="btn sm danger" data-co="clear">Clear records…</button>';
   $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Trial / plan</th><th>Created</th><th></th></tr>" +
-    data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actions(c)}</td></tr>`).join("");
+    data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actionsAll(c)}</td></tr>`).join("");
 }
 $("companyTable").addEventListener("click", async e => {
   const btn = e.target.closest("button[data-co]"); if (!btn) return;
   const tr = btn.closest("tr"), id = tr.dataset.id, name = tr.dataset.name;
   btn.disabled = true;
   try {
-    if (btn.dataset.co === "extend") {
+    if (btn.dataset.co === "clear") {
+      /* For records that landed in the wrong company (e.g. pushed up from a
+         browser last used by another company). Members and sign-ins stay. */
+      const { data: recs } = await api("/admin/companies/" + id + "/records");
+      if (!recs.length) { alert(name + " has no synced records to clear."); return; }
+      const list = recs.map(r => "  • " + r.key + " (changed " + fmtDate(r.updated_at) + ")").join("\n");
+      const typed = prompt("Permanently delete ALL of " + name + "'s records?\n\n" + list +
+        "\n\nMembers, roles, sign-ins and the trial are kept. Members' browsers drop their copy the next time they open the app. This can't be undone.\n\nType the company name exactly to confirm:", "");
+      if (typed === null) return;
+      if (typed.trim() !== name) { alert("The name didn't match — nothing was cleared."); return; }
+      const { data: out } = await api("/admin/companies/" + id + "/clear-records", { method: "POST", body: { confirm_name: typed.trim() } });
+      alert("Cleared " + out.cleared.length + " record set(s) from " + name + ".");
+    } else if (btn.dataset.co === "extend") {
       const n = prompt("Extend the trial for " + name + " by how many days?", "14");
       if (n === null) return;
       const days = parseInt(n, 10);
