@@ -129,26 +129,31 @@ def render_html(subject: str, text: str, button: str = None) -> str:
 
 
 def build_message(subject: str, body: str, reply_to: str = None,
-                  to: str = None) -> EmailMessage:
+                  to: str = None, bcc: str = None) -> EmailMessage:
     msg = EmailMessage()
     msg["Subject"] = _clean(subject, 150)
     msg["From"] = formataddr((config.MAIL_FROM_NAME, config.MAIL_FROM))
     msg["To"] = _clean(to, 320) if to else config.MAIL_TO
     if reply_to:
         msg["Reply-To"] = _clean(reply_to, 320)
+    if bcc:
+        msg["Bcc"] = _clean(bcc, 320)        # smtplib sends to it and strips the header
     msg.set_content(str(body))
     msg.add_alternative(render_html(subject, body, getattr(body, "button", None)),
                         subtype="html")
     return msg
 
 
-def _send_resend(subject: str, body: str, reply_to: str = None, to: str = None):
+def _send_resend(subject: str, body: str, reply_to: str = None, to: str = None,
+                 bcc: str = None):
     """Resend HTTPS API. Raises on any non-2xx so send_mail logs it."""
     payload = {"from": formataddr((config.MAIL_FROM_NAME, config.MAIL_FROM)),
                "to": [_clean(to, 320) if to else config.MAIL_TO], "subject": _clean(subject, 150), "text": str(body),
                "html": render_html(subject, body, getattr(body, "button", None))}
     if reply_to:
         payload["reply_to"] = _clean(reply_to, 320)
+    if bcc:
+        payload["bcc"] = [_clean(bcc, 320)]
     req = urllib.request.Request(
         "https://api.resend.com/emails", data=json.dumps(payload).encode(),
         method="POST",
@@ -160,18 +165,28 @@ def _send_resend(subject: str, body: str, reply_to: str = None, to: str = None):
             raise RuntimeError(f"Resend returned HTTP {resp.status}")
 
 
+def copy_to(recipient: str):
+    """The record-keeping blind copy for invitation/welcome emails (MAIL_COPY_TO),
+    or None when it's off or would just duplicate the recipient."""
+    copy = config.MAIL_COPY_TO
+    if not copy or copy.lower() == (recipient or "").strip().lower():
+        return None
+    return copy
+
+
 def send_mail(subject: str, body: str, reply_to: str = None,
-              to: str = None) -> bool:
-    """Send one message to `to` (default: MAIL_TO, the owner). True on success."""
+              to: str = None, bcc: str = None) -> bool:
+    """Send one message to `to` (default: MAIL_TO, the owner), optionally
+    blind-copied to `bcc`. True on success."""
     if not enabled():
         log.info("EMAIL disabled (no RESEND_API_KEY or SMTP_PASSWORD); skipped: %s",
                  _clean(subject))
         return False
     try:
         if config.RESEND_API_KEY:
-            _send_resend(subject, body, reply_to, to)
+            _send_resend(subject, body, reply_to, to, bcc)
             return True
-        msg = build_message(subject, body, reply_to, to)
+        msg = build_message(subject, body, reply_to, to, bcc)
         ctx = ssl.create_default_context()
         if config.SMTP_PORT == 465:
             server = smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT,

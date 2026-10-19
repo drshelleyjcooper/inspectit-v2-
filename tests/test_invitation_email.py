@@ -12,9 +12,9 @@ def outbox(monkeypatch):
     from api import mailer
     box = []
     monkeypatch.setattr(mailer, "send_mail",
-                        lambda subject, body, reply_to=None, to=None:
+                        lambda subject, body, reply_to=None, to=None, bcc=None:
                         box.append({"subject": subject, "body": body,
-                                    "reply_to": reply_to, "to": to}) or True)
+                                    "reply_to": reply_to, "to": to, "bcc": bcc}) or True)
     mailer.invite_mail_limiter.reset()
     yield box
     mailer.invite_mail_limiter.reset()
@@ -47,6 +47,7 @@ def test_invitee_gets_email_with_working_link(client, outbox):
     assert len(outbox) == 1
     m = outbox[0]
     assert m["to"] == to and m["reply_to"] == admin_email
+    assert m["bcc"] == config.MAIL_COPY_TO == "info@inspectit.app"   # record copy
     assert "Ada Admin" in m["subject"] and cname in m["subject"]
     assert "Viewer" in m["body"] and "14 days" in m["body"]
     link = [w for w in m["body"].split() if "?invite=" in w][0]
@@ -103,3 +104,36 @@ def test_hostile_names_cannot_inject_headers(client):
                                    ["Viewer"], "https://inspectit.app/x", 14)
     msg = mailer.build_message(s, b, reply_to="eve@x.y")
     assert "\n" not in msg["Subject"] and msg["Bcc"] is None
+
+
+def test_record_copy_can_be_turned_off(client, outbox, monkeypatch):
+    from api import config, mailer
+    monkeypatch.setattr(config, "MAIL_COPY_TO", "")
+    cid, hdr, _, roles, _ = _company(client)
+    assert _invite(client, cid, hdr, f"nocopy-{uuid.uuid4().hex[:8]}@example.com",
+                   roles["Viewer"]).status_code == 200
+    assert outbox[-1]["bcc"] is None
+    monkeypatch.setattr(config, "MAIL_COPY_TO", "info@inspectit.app")
+    assert mailer.copy_to("INFO@inspectit.app") is None      # never a duplicate to itself
+
+
+def test_bcc_reaches_resend_and_smtp_but_not_the_visible_headers(monkeypatch):
+    from api import config, mailer
+    s, b = mailer.invitation_email("Ada", "Co", ["Viewer"], "https://x/y", 14)
+    msg = mailer.build_message(s, b, to="new@x.y", bcc="info@inspectit.app")
+    assert msg["Bcc"] == "info@inspectit.app" and msg["To"] == "new@x.y"
+    sent = {}
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout=None):
+        import json
+        sent.update(json.loads(req.data))
+        return Resp()
+    monkeypatch.setattr(config, "RESEND_API_KEY", "test-key")
+    monkeypatch.setattr(mailer.urllib.request, "urlopen", fake_urlopen)
+    assert mailer.send_mail(s, b, None, "new@x.y", "info@inspectit.app") is True
+    assert sent["to"] == ["new@x.y"] and sent["bcc"] == ["info@inspectit.app"]

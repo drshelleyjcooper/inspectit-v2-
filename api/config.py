@@ -146,6 +146,10 @@ SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", "info@inspectit.app")
 MAIL_FROM_NAME = os.environ.get("MAIL_FROM_NAME", "Inspectit.app")
 MAIL_TO = os.environ.get("MAIL_TO", "info@inspectit.app")
+# Invitation and welcome emails are also blind-copied here, so the mailbox
+# keeps a record of what went out (Resend sends them, not Outlook, so they
+# don't show in Sent Items). Set MAIL_COPY_TO to an empty value to turn off.
+MAIL_COPY_TO = os.environ.get("MAIL_COPY_TO", "info@inspectit.app").strip()
 # Preferred over SMTP when set: Resend (resend.com) HTTPS API. Needs inspectit.app
 # verified at Resend (DNS records), and sends as MAIL_FROM. Secret: env only.
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")

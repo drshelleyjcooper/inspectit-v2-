@@ -123,7 +123,7 @@ def create_invitation(body: InviteIn, background: BackgroundTasks,
             ctx.user.get("name"), company_name, sorted(wanted), link,
             config.INVITE_TTL_DAYS)
         background.add_task(mailer.send_mail, subject, text,
-                            ctx.user.get("email"), email)
+                            ctx.user.get("email"), email, mailer.copy_to(email))
     except HTTPException:
         log.warning("invitation email skipped: rate limit for user %s", ctx.user["id"])
     return {"invitation_id": str(inv["id"]), "token": token}

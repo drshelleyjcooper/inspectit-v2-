@@ -15,8 +15,8 @@ def outbox(monkeypatch):
     from api import mailer
     box = []
     monkeypatch.setattr(mailer, "send_mail",
-                        lambda subject, body, reply_to=None, to=None:
-                        box.append({"subject": subject, "body": body, "to": to}) or True)
+                        lambda subject, body, reply_to=None, to=None, bcc=None:
+                        box.append({"subject": subject, "body": body, "to": to, "bcc": bcc}) or True)
     return box
 
 
@@ -57,6 +57,7 @@ def test_create_user_emails_a_welcome_link_and_shows_no_password(client, admin_h
     assert len(outbox) == 1
     m = outbox[0]
     assert m["to"] == body["email"]
+    assert m["bcc"] == "info@inspectit.app"                   # record copy
     assert m["subject"] == "Welcome to Inspectit.app: set your password"
     assert body["company_name"] in m["body"] and "Company Administrator" in m["body"]
     assert "7 days" in m["body"]

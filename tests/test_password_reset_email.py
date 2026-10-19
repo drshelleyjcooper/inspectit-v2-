@@ -10,7 +10,7 @@ def outbox(monkeypatch):
     from api import mailer
     box = []
     monkeypatch.setattr(mailer, "send_mail",
-                        lambda subject, body, reply_to=None, to=None:
+                        lambda subject, body, reply_to=None, to=None, bcc=None:
                         box.append({"subject": subject, "body": body, "to": to}) or True)
     return box
 
