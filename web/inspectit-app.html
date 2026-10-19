@@ -1505,6 +1505,45 @@ async function cloudLoginRequest(api, path, body) {
   return out;
 }
 
+/* Which company the records in this browser belong to. Survives sign-out
+   (the data does too), so signing in to a different company can tell the
+   leftover records aren't its own. Until 2026-10-19 there was no such check:
+   the initial sync kept every local collection the new company's server copy
+   lacked (its company profile, for one) and pushed them up to it. */
+const DATA_OWNER_KEY = "inspectit.dataCompany";      // local-only (never synced)
+
+function cloudLocalHasData() {
+  return CLOUD_SYNC_NAMES.some(n => store.get(CLOUD_FULLKEY[n]) != null);
+}
+
+function cloudClearLocalData() {
+  cloudApplying = true;
+  try { CLOUD_SYNC_NAMES.forEach(n => store.remove(CLOUD_FULLKEY[n])); }
+  finally { cloudApplying = false; }
+}
+
+/* Called on sign-in, before the initial sync. Records from another company
+   are removed from this browser (that company's server copy keeps them).
+   Records of unknown origin (used signed out, or saved before this check
+   existed) are only added to the company if the person says so. */
+function cloudClaimLocalData(companyId, companyName) {
+  const prev = cloudCfg();
+  const owner = store.get(DATA_OWNER_KEY) || (prev && prev.company) || null;
+  if (owner !== String(companyId) && cloudLocalHasData()) {
+    let keep = false;
+    if (!owner) {
+      const p = getJSON(K.profile, null);
+      const from = p && p.companyName ? " (company: \u201c" + p.companyName + "\u201d)" : "";
+      keep = confirm("This browser already has records saved" + from +
+        " that aren't linked to any account.\n\nAdd them to \u201c" + (companyName || "this company") +
+        "\u201d?\n\nOK = add them. Cancel = remove them from this browser and load \u201c" +
+        (companyName || "this company") + "\u201d only.");
+    }
+    if (!keep) cloudClearLocalData();
+  }
+  store.set(DATA_OWNER_KEY, String(companyId));
+}
+
 async function cloudSignIn(api, email, password) {
   const t = await cloudLoginRequest(api, "/auth/login", { email: email, password: password });
   const meR = await fetch(api + "/me", { headers: { Authorization: "Bearer " + t.access_token } });
@@ -1512,6 +1551,7 @@ async function cloudSignIn(api, email, password) {
   if (!me.memberships || !me.memberships.length)
     throw new Error("This account isn't a member of any company yet.");
   const m = me.memberships[0];   // v1: first membership
+  cloudClaimLocalData(m.company_id, m.company_name);
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
                  company: m.company_id, companyName: m.company_name,
                  userId: me.id || me.user_id || null, userName: me.name || null,
@@ -1526,6 +1566,7 @@ async function cloudCreateAccount(api, companyName, yourName, email, password) {
   const t = await cloudLoginRequest(api, "/auth/signup",
     { company_name: companyName, name: yourName, email: email, password: password,
       signup_code: SIGNUP_CODE || undefined });
+  cloudClaimLocalData(t.company_id, companyName);
   /* the account creator is the company's first administrator */
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
                  company: t.company_id, companyName: companyName,
