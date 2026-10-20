@@ -80,7 +80,8 @@ def test_create_user_in_existing_company_generated_password(client, admin):
 
     # Duplicate email -> 409
     r = client.post("/admin/users", headers=admin["hdr"], json={
-        "email": email, "name": "Dup", "password": "password123"})
+        "email": email, "name": "Dup", "password": "password123",
+        "company_id": admin["company_id"]})
     assert r.status_code == 409
 
 
@@ -101,7 +102,7 @@ def test_create_user_with_new_company(client, admin):
 def test_reset_password_signs_out_and_works(client, admin):
     email = f"rst-{uuid.uuid4().hex[:6]}@example.com"
     uid = client.post("/admin/users", headers=admin["hdr"], json={
-        "email": email, "name": "Reset Me", "password": "oldpassword1"}).json()["id"]
+        "email": email, "name": "Reset Me", "password": "oldpassword1", "account_type": "individual"}).json()["id"]
     old = client.post("/auth/login", json={"email": email, "password": "oldpassword1"}).json()
 
     r = client.post(f"/admin/users/{uid}/reset-password", headers=admin["hdr"], json={})
@@ -126,7 +127,7 @@ def test_reset_password_signs_out_and_works(client, admin):
 def test_disable_and_enable(client, admin):
     email = f"dis-{uuid.uuid4().hex[:6]}@example.com"
     uid = client.post("/admin/users", headers=admin["hdr"], json={
-        "email": email, "name": "Disable Me", "password": "password123"}).json()["id"]
+        "email": email, "name": "Disable Me", "password": "password123", "account_type": "individual"}).json()["id"]
     tok = client.post("/auth/login", json={"email": email, "password": "password123"}).json()
 
     r = client.patch(f"/admin/users/{uid}", headers=admin["hdr"], json={"disabled": True})
@@ -195,3 +196,54 @@ def test_clear_records_unknown_company(client, admin):
     r = client.post(f"/admin/companies/{uuid.uuid4()}/clear-records",
                     json={"confirm_name": "x"}, headers=admin["hdr"])
     assert r.status_code == 404
+
+
+def test_blank_company_is_refused_unless_platform_admin(client, admin):
+    t = uuid.uuid4().hex[:6]
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"blank-{t}@example.com", "name": "Blank", "role": "Company Administrator"})
+    assert r.status_code == 422 and "Individual" in r.json()["detail"]
+    assert client.get(f"/admin/users?q=blank-{t}", headers=admin["hdr"]).json() == []
+    # a platform admin may exist without a company
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"pa-{t}@example.com", "name": "Ops", "is_platform_admin": True})
+    assert r.status_code == 201 and r.json()["memberships"] == []
+
+
+def test_individual_account(client, admin):
+    t = uuid.uuid4().hex[:6]
+    email = f"indiv-{t}@example.com"
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": email, "name": f"Jane Owner {t}", "password": "password123",
+        "account_type": "individual", "role": "Viewer"})            # role ignored
+    assert r.status_code == 201, r.text
+    m = r.json()["memberships"]
+    assert [x["company_name"] for x in m] == [f"Jane Owner {t}"]
+    assert m[0]["roles"] == ["Company Administrator"]
+    tok = client.post("/auth/login", json={"email": email, "password": "password123"}).json()
+    me = client.get("/me", headers=_auth(tok["access_token"])).json()
+    assert me["memberships"][0]["account_type"] == "individual"
+    cid = me["memberships"][0]["company_id"]
+    # they can use their account straight away
+    r = client.put(f"/companies/{cid}/collections/vehicles",
+                   json={"data": [{"id": "v1"}]}, headers=_auth(tok["access_token"]))
+    assert r.status_code == 200, r.text
+    cos = client.get(f"/admin/companies?q=Jane Owner {t}", headers=admin["hdr"]).json()
+    assert cos[0]["account_type"] == "individual"
+    # an individual account can't be given a company
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"indiv2-{t}@example.com", "name": "X", "account_type": "individual",
+        "company_name": "Some Co"})
+    assert r.status_code == 422
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"indiv3-{t}@example.com", "name": "X", "account_type": "household"})
+    assert r.status_code == 422
+
+
+def test_business_accounts_are_marked_business(client, admin):
+    t = uuid.uuid4().hex[:6]
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"biz-{t}@example.com", "name": "Biz", "company_name": f"Biz Co {t}"})
+    assert r.status_code == 201
+    assert client.get(f"/admin/companies?q=Biz Co {t}",
+                      headers=admin["hdr"]).json()[0]["account_type"] == "business"

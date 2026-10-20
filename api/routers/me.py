@@ -13,7 +13,8 @@ def me(user: dict = Depends(current_user)):
     with get_pool().connection() as conn:
         memberships = conn.execute(
             """SELECT m.id AS membership_id, m.company_id, c.name AS company_name,
-                      m.can_grant_viewers, c.trial_ends_at, c.subscribed_at, c.complimentary
+                      m.can_grant_viewers, c.trial_ends_at, c.subscribed_at, c.complimentary,
+                      c.account_type
                FROM memberships m JOIN companies c ON c.id = m.company_id
                WHERE m.user_id = %s AND m.status = 'active'
                  AND m.deleted_at IS NULL AND c.deleted_at IS NULL""",
@@ -36,6 +37,7 @@ def me(user: dict = Depends(current_user)):
             out.append({
                 "company_id": str(m["company_id"]),
                 "company_name": m["company_name"],
+                "account_type": m["account_type"],      # 'business' | 'individual'
                 # grants / viewer_grants and can_grant_viewers are what the
                 # invite form needs to build its role list from the server
                 # instead of a hardcoded copy of §4.2 (USER-ROLES-SPEC §5).

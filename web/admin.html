@@ -95,11 +95,14 @@
           <div><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cEmailSetup" checked style="min-width:0"> Email them a link to set their own password</label></div>
         </div>
         <div class="row" style="margin-top:10px">
-          <div><label>Company</label>
-            <select id="cCompany"><option value="">— none —</option><option value="__new__">+ New company…</option></select></div>
+          <div><label for="cType">Account type</label>
+            <select id="cType"><option value="business">Business</option><option value="individual">Individual</option></select></div>
+          <div id="cCompanyWrap"><label>Company</label>
+            <select id="cCompany"><option value="">— choose —</option><option value="__new__">+ New company…</option></select></div>
           <div id="cNewCoWrap" class="hidden"><label>New company name</label><input id="cNewCo"></div>
+          <div id="cIndivNote" class="hidden small muted" style="align-self:center;max-width:260px">A private account in their name; they manage it themselves (Company Administrator).</div>
           <div id="cCompWrap" class="hidden"><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cComp" style="min-width:0"> Complimentary (test) account <span class="small muted">no trial, no paywall</span></label></div>
-          <div><label>Role</label><select id="cRole"></select></div>
+          <div id="cRoleWrap"><label>Role</label><select id="cRole"></select></div>
           <div><label>&nbsp;</label><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="cAdmin" style="min-width:0"> Platform admin</label></div>
           <button class="btn primary" id="createBtn">Create</button>
         </div>
@@ -243,7 +246,7 @@ async function loadCompaniesInto() {
   const { data } = await api("/admin/companies");
   companyCache = data;
   const sel = $("cCompany"); const cur = sel.value;
-  sel.innerHTML = '<option value="">— none —</option><option value="__new__">+ New company…</option>' +
+  sel.innerHTML = '<option value="">— choose —</option><option value="__new__">+ New company…</option>' +
     data.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (${c.members})</option>`).join("");
   sel.value = cur;
 }
@@ -270,7 +273,7 @@ async function loadCompanies() {
     + (["trialing", "grace", "suspended", "expired"].includes(c.access) ? ' <button class="btn sm" data-co="extend">Extend trial</button>' : "") + comp(c);
   const actionsAll = c => actions(c) + ' <button class="btn sm danger" data-co="clear">Clear records…</button>';
   $("companyTable").innerHTML = "<tr><th>Company</th><th>Active members</th><th>Trial / plan</th><th>Created</th><th></th></tr>" +
-    data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actionsAll(c)}</td></tr>`).join("");
+    data.map(c => `<tr data-id="${esc(c.id)}" data-name="${esc(c.name)}"><td>${esc(c.name)}${c.account_type === "individual" ? ' <span class="pill new">individual</span>' : ""}<div class="small muted">${esc(c.id)}</div></td><td>${c.members}</td><td>${status(c)}</td><td class="muted small">${esc(fmtDate(c.created_at))}</td><td style="white-space:nowrap">${actionsAll(c)}</td></tr>`).join("");
 }
 $("companyTable").addEventListener("click", async e => {
   const btn = e.target.closest("button[data-co]"); if (!btn) return;
@@ -308,7 +311,20 @@ $("companyTable").addEventListener("click", async e => {
   } catch (ex) { alert(ex.message); }
   finally { btn.disabled = false; }
 });
-$("cCompany").addEventListener("change", () => { const nw = $("cCompany").value === "__new__"; $("cNewCoWrap").classList.toggle("hidden", !nw); $("cCompWrap").classList.toggle("hidden", !nw); if (!nw) $("cComp").checked = false; });
+/* Business: pick or create a company + role. Individual: neither; the server
+   makes a private account named after the person, with them as its admin. */
+function syncCreateForm() {
+  const indiv = $("cType").value === "individual";
+  const nw = !indiv && $("cCompany").value === "__new__";
+  $("cCompanyWrap").classList.toggle("hidden", indiv);
+  $("cRoleWrap").classList.toggle("hidden", indiv);
+  $("cIndivNote").classList.toggle("hidden", !indiv);
+  $("cNewCoWrap").classList.toggle("hidden", !nw);
+  $("cCompWrap").classList.toggle("hidden", !(nw || indiv));
+  if (!(nw || indiv)) $("cComp").checked = false;
+}
+$("cCompany").addEventListener("change", syncCreateForm);
+$("cType").addEventListener("change", syncCreateForm);
 
 /* Roles are the built-in presets; any company's /roles lists them, so use the
    first company we know about (there's always at least the admin's own). */
@@ -376,8 +392,12 @@ $("createBtn").addEventListener("click", async () => {
                    is_platform_admin: $("cAdmin").checked };
     if ($("cEmailSetup").checked) body.send_setup_email = true;
     else if ($("cPass").value) body.password = $("cPass").value;
-    if (co === "__new__") { body.company_name = $("cNewCo").value.trim(); if ($("cComp").checked) body.complimentary = true; }
+    if ($("cType").value === "individual") {
+      body.account_type = "individual"; delete body.role;
+      if ($("cComp").checked) body.complimentary = true;
+    } else if (co === "__new__") { body.company_name = $("cNewCo").value.trim(); if ($("cComp").checked) body.complimentary = true; }
     else if (co) body.company_id = co;
+    else if (!body.is_platform_admin) throw new Error("Choose a company (or + New company…), or set Account type to Individual.");
     const { data } = await api("/admin/users", { method: "POST", body });
     const o = $("createOut"); o.classList.remove("hidden");
     if ("setup_email_sent" in data) {
@@ -387,7 +407,7 @@ $("createBtn").addEventListener("click", async () => {
     } else {
       o.textContent = "Created " + data.email + ". Password: " + data.password + (data.password_generated ? "   (generated — shown once, copy it now)" : "");
     }
-    ["cName","cEmail","cPass","cNewCo"].forEach(i => $(i).value = ""); $("cAdmin").checked = false; $("cComp").checked = false; $("cEmailSetup").checked = true;
+    ["cName","cEmail","cPass","cNewCo"].forEach(i => $(i).value = ""); $("cAdmin").checked = false; $("cComp").checked = false; $("cEmailSetup").checked = true; $("cType").value = "business"; $("cCompany").value = ""; syncCreateForm();
     await loadUsers(); await loadCompaniesInto();
   } catch (ex) { $("createErr").textContent = ex.message; }
   finally { $("createBtn").disabled = false; }

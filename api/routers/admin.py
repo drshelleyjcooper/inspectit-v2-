@@ -21,7 +21,7 @@ runs at startup. The frontend is web/admin.html.
 import secrets
 import string
 import uuid
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -195,6 +195,7 @@ def list_companies(q: Optional[str] = None,
     with get_pool().connection() as conn:
         rows = conn.execute("""
             SELECT c.id, c.name, c.created_at, c.trial_ends_at, c.subscribed_at, c.complimentary,
+                   c.account_type,
                    count(m.id) FILTER (WHERE m.deleted_at IS NULL AND m.status = 'active') AS members
             FROM companies c
             LEFT JOIN memberships m ON m.company_id = c.id
@@ -362,8 +363,15 @@ class CreateUserIn(BaseModel):
     email: str = Field(min_length=5, max_length=320)
     name: str = Field(min_length=1, max_length=200)
     password: Optional[str] = Field(default=None, min_length=PASSWORD_MIN, max_length=200)
-    # Attach to an existing company, or create a new one. If neither is
-    # given the user is created with no membership (they can be invited later).
+    # business: attach to an existing company (company_id) or a new one
+    #   (company_name). One of the two is required, except for a platform
+    #   admin, who may have no company.
+    # individual: one person (a homeowner, a vehicle owner). A private
+    #   account named after them is created and they administer it; no
+    #   company_id / company_name / role.
+    # Until 2026-10-20 a blank company silently made a user with no
+    # membership, who then couldn't get into the app.
+    account_type: Literal["business", "individual"] = "business"
     company_id: Optional[str] = None
     company_name: Optional[str] = Field(default=None, max_length=200)
     role: str = DEFAULT_ROLE          # preset role name for the membership
@@ -379,9 +387,19 @@ class CreateUserIn(BaseModel):
 @router.post("/users", status_code=201)
 def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
     email = _normalize_email(body.email)
-    if body.company_id and body.company_name:
+    new_company = (body.company_name or "").strip()
+    individual = body.account_type == "individual"
+    if individual:
+        if body.company_id or new_company:
+            raise HTTPException(422, "An individual account has no company: leave "
+                                     "the company blank")
+        new_company = body.name.strip()
+    elif body.company_id and new_company:
         raise HTTPException(422, "Give company_id OR company_name, not both")
-    if body.complimentary and not (body.company_name and body.company_name.strip()):
+    elif not (body.company_id or new_company or body.is_platform_admin):
+        raise HTTPException(422, "Choose a company (or create a new one), or make it "
+                                 "an Individual account. Without one they can't use the app.")
+    if body.complimentary and not new_company:
         raise HTTPException(422, "complimentary applies to a new company: give "
                                  "company_name, or use the Companies tab for an existing one")
     if body.send_setup_email and body.password:
@@ -398,10 +416,12 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
         ).fetchone()
 
         company_id = None
-        if body.company_name and body.company_name.strip():
+        role_name = DEFAULT_ROLE if individual else body.role
+        if new_company:
             company_id = conn.execute(
-                "INSERT INTO companies (name, complimentary) VALUES (%s, %s) RETURNING id",
-                (body.company_name.strip(), body.complimentary)).fetchone()["id"]
+                """INSERT INTO companies (name, complimentary, account_type)
+                   VALUES (%s, %s, %s) RETURNING id""",
+                (new_company, body.complimentary, body.account_type)).fetchone()["id"]
         elif body.company_id:
             cid = _uuid(body.company_id, "Company")
             if not conn.execute(
@@ -416,9 +436,9 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
                    WHERE name = %s AND deleted_at IS NULL
                      AND (company_id IS NULL OR company_id = %s)
                    ORDER BY company_id NULLS LAST LIMIT 1""",
-                (body.role, company_id)).fetchone()
+                (role_name, company_id)).fetchone()
             if not role:
-                raise HTTPException(422, f"Unknown role '{body.role}'")
+                raise HTTPException(422, f"Unknown role '{role_name}'")
             membership = conn.execute(
                 "INSERT INTO memberships (company_id, user_id) VALUES (%s, %s) RETURNING id",
                 (company_id, user["id"])).fetchone()
@@ -427,7 +447,8 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
                 (membership["id"], role["id"]))
             audit(conn, company_id, admin["id"], "create", "membership",
                   membership["id"], {"event": "admin_create_user",
-                                     "user_id": str(user["id"]), "role": body.role})
+                                     "user_id": str(user["id"]), "role": role_name,
+                                     "account_type": body.account_type})
         out = _user_out(_fetch_user(conn, user["id"]))
         setup_link = None
         if body.send_setup_email:
@@ -435,10 +456,11 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
             setup_link = f"{config.APP_BASE_URL}/reset-password?token={token}&welcome=1"
             company_label = (conn.execute("SELECT name FROM companies WHERE id = %s",
                                           (company_id,)).fetchone()["name"]
-                             if company_id else None)
+                             if company_id and not individual else None)
     if body.send_setup_email:
+        # An individual's account is just them: no "for <company>, role ..." lines.
         subject, text = mailer.welcome_email(body.name, company_label,
-                                             body.role if company_id else None,
+                                             body.role if company_label else None,
                                              setup_link, config.ADMIN_LINK_TTL_MIN)
         sent = mailer.send_mail(subject, text, None, email,     # sync: the admin is waiting
                                 mailer.copy_to(email))
