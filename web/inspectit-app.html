@@ -571,7 +571,9 @@
         <div class="account-badge__text">
           <div class="account-badge__label">Signed in as</div>
           <div class="account-badge__email" id="accountBadgeEmail"></div>
+          <div class="account-badge__label hidden" id="accountBadgeAcct"></div>
         </div>
+        <button class="account-badge__logout hidden" id="accountBadgeSwitch" title="Switch to another account">Switch</button>
         <button class="account-badge__logout" id="accountBadgeLogout" title="Not you? Log out">Not you?</button>
       </div>
       <div class="profile-chip" id="profileChip"></div>
@@ -646,6 +648,7 @@
           <button class="ghost" id="btnImport" data-perm="company:admin">Import backup</button>
           <button class="ghost" id="btnCloud">Cloud sync</button>
           <button class="ghost" id="btnCalendar">Calendar</button>
+          <button class="ghost hidden" id="btnSwitchAcct">Switch account</button>
           <span class="spacer"></span>
           <button class="danger" id="btnLogout">Log out</button>
           <p class="backup-note" id="backupNote"></p>
@@ -1147,8 +1150,10 @@ async function permsRefresh() {
     const grants = permReadGrants(m);
     if (grants) cur.grants = grants;
     cur.companyName = m.company_name || cur.companyName;
+    cur.accounts = cloudAccountList(me);
     cloudSaveCfg(cur);
     applyPerms();
+    try { renderAccountBadge(); } catch (_) {}
   } catch (_) { /* offline — keep the cached roles */ }
 }
 
@@ -1558,16 +1563,39 @@ function cloudClaimLocalData(companyId, companyName) {
   store.set(DATA_OWNER_KEY, String(companyId));
 }
 
-async function cloudSignIn(api, email, password) {
+/* One login can belong to several accounts (a company job and their own
+   Individual account, say). The app works in one at a time: the one asked
+   for (an invitation just accepted), else the one last used with this email
+   in this browser, else the first. */
+const LAST_ACCOUNT_KEY = "inspectit.lastAccount";     // local-only: email -> company id
+function cloudAccountList(me) {
+  return (me.memberships || []).map(x => ({ id: x.company_id, name: x.company_name,
+                                            type: x.account_type || "business" }));
+}
+function cloudPickMembership(me, email, prefer) {
+  const ms = me.memberships || [];
+  const last = getJSON(LAST_ACCOUNT_KEY, {})[String(email).toLowerCase()];
+  return ms.find(x => x.company_id === prefer) || ms.find(x => x.company_id === last) || ms[0];
+}
+function cloudRememberAccount(email, companyId) {
+  const last = getJSON(LAST_ACCOUNT_KEY, {});
+  last[String(email).toLowerCase()] = companyId;
+  setJSON(LAST_ACCOUNT_KEY, last);
+}
+
+async function cloudSignIn(api, email, password, preferCompany) {
   const t = await cloudLoginRequest(api, "/auth/login", { email: email, password: password });
   const meR = await fetch(api + "/me", { headers: { Authorization: "Bearer " + t.access_token } });
   const me = await meR.json();
   if (!me.memberships || !me.memberships.length)
-    throw new Error("This account isn't a member of any company yet.");
-  const m = me.memberships[0];   // v1: first membership
+    throw new Error("This login isn't part of any account yet. Ask your administrator " +
+                    "to add you to a company or set up your own account.");
+  const m = cloudPickMembership(me, email, preferCompany);
   cloudClaimLocalData(m.company_id, m.company_name);
+  cloudRememberAccount(email, m.company_id);
   cloudSaveCfg({ api: api, email: email, access: t.access_token, refresh: t.refresh_token,
                  company: m.company_id, companyName: m.company_name,
+                 accounts: cloudAccountList(me),
                  userId: me.id || me.user_id || null, userName: me.name || null,
                  roles: permReadRoles(m), permissions: permReadBlob(m),
                  canGrantViewers: typeof m.can_grant_viewers === "boolean" ? m.can_grant_viewers : undefined,
@@ -1796,7 +1824,7 @@ $("loginForm").addEventListener("submit", async e => {
       const who = res.email || (res.user && res.user.email);
       if (!who) throw new Error("The invitation was accepted but the server didn't say " +
                                 "which email it belongs to. Sign in with your email and this password.");
-      await cloudSignIn(api, who, p);
+      await cloudSignIn(api, who, p, res.company_id);   // open the account just joined
       apiSave(api);
       store.set(K.session, "1");
       history.replaceState(null, "", location.pathname);   // drop the token from the URL
@@ -1860,7 +1888,71 @@ function renderAccountBadge() {
   const c = cloudCfg();
   if (!c || !c.email) { badge.classList.add("hidden"); return; }
   $("accountBadgeEmail").textContent = c.email;
+  const many = (c.accounts || []).length > 1;
+  $("accountBadgeAcct").textContent = c.companyName || "";
+  $("accountBadgeAcct").classList.toggle("hidden", !many);
+  $("accountBadgeSwitch").classList.toggle("hidden", !many);
+  $("btnSwitchAcct").classList.toggle("hidden", !many);
   badge.classList.remove("hidden");
+}
+
+/* ---------- switch account (one login, several accounts) ---------- */
+async function cloudSwitchAccount(companyId) {
+  const c = cloudCfg();
+  if (!cloudSignedIn()) throw new Error("Sign in first.");
+  await cloudFlush();
+  const after = cloudCfg();
+  if (after && Object.keys(after.pending || {}).length)
+    throw new Error("Some changes in this account haven't reached the server yet. " +
+                    "Check your connection and try again, so nothing is lost.");
+  const r = await cloudFetch("/me", {});
+  if (!r.ok) throw new Error("Couldn't reach the server (" + r.status + ").");
+  const me = await r.json();
+  const m = (me.memberships || []).find(x => x.company_id === companyId);
+  if (!m) throw new Error("You're no longer part of that account.");
+  /* This browser holds one account's records at a time: the old account's
+     copy is dropped (the server keeps it) and the new one is pulled. */
+  cloudClaimLocalData(m.company_id, m.company_name);
+  cloudRememberAccount(c.email, m.company_id);
+  const cur = cloudCfg();
+  Object.assign(cur, {
+    company: m.company_id, companyName: m.company_name, accounts: cloudAccountList(me),
+    roles: permReadRoles(m), permissions: permReadBlob(m),
+    canGrantViewers: typeof m.can_grant_viewers === "boolean" ? m.can_grant_viewers : undefined,
+    grants: permReadGrants(m) || undefined, rawMembership: m,
+    meta: {}, pending: {}, lastSync: undefined });
+  cloudSaveCfg(cur);
+  await cloudSyncNow(true);
+  applyPerms();
+  renderProfileChip();
+  renderAccountBadge();
+  navigate("home");
+}
+
+function openSwitchAccount() {
+  const c = cloudCfg(); if (!c) return;
+  const list = (c.accounts || []).map(a => `
+    <label style="display:flex;gap:10px;align-items:center;padding:10px;border:1px solid var(--border, #d0d4da);border-radius:10px;margin-bottom:8px;cursor:pointer">
+      <input type="radio" name="swAcct" value="${esc(a.id)}" ${a.id === c.company ? "checked" : ""}>
+      <span><b>${esc(a.name)}</b><br><span style="font-size:.85rem;color:var(--muted)">${a.type === "individual" ? "Your own account" : "Business"}${a.id === c.company ? " · current" : ""}</span></span>
+    </label>`).join("");
+  const close = openModal("Switch account",
+    `<p style="margin-top:0">Your login (${esc(c.email)}) belongs to these accounts. Each has its own records.</p>${list}<p class="err" id="swErr" role="alert" style="color:var(--defect, #c62828)"></p>`,
+    `<button class="ghost" id="swCancel">Cancel</button><button class="primary" id="swGo">Switch</button>`);
+  $("swCancel").onclick = close;
+  $("swGo").onclick = async () => {
+    const pick = document.querySelector('input[name="swAcct"]:checked');
+    if (!pick || pick.value === c.company) { close(); return; }
+    const b = $("swGo"); b.disabled = true; b.textContent = "Switching…";
+    try {
+      await cloudSwitchAccount(pick.value);
+      close();
+      toast("Now in " + (cloudCfg().companyName || "the other account"));
+    } catch (ex) {
+      $("swErr").textContent = (ex && ex.message) || "Couldn't switch accounts.";
+      b.disabled = false; b.textContent = "Switch";
+    }
+  };
 }
 
 /* ---------- navigation ---------- */
@@ -2299,6 +2391,8 @@ function calRender(st, closeOld) {
   };
 }
 $("btnCalendar").addEventListener("click", openCalendarSettings);
+$("btnSwitchAcct").addEventListener("click", openSwitchAccount);
+$("accountBadgeSwitch").addEventListener("click", openSwitchAccount);
 
 /* ---------- cloud sync UI ---------- */
 $("btnCloud").addEventListener("click", () => {

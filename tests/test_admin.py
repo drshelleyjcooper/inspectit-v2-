@@ -247,3 +247,101 @@ def test_business_accounts_are_marked_business(client, admin):
     assert r.status_code == 201
     assert client.get(f"/admin/companies?q=Biz Co {t}",
                       headers=admin["hdr"]).json()[0]["account_type"] == "business"
+
+
+# ---------- one login, several accounts ----------
+
+def _stranded(client, admin, t):
+    """A login with no account (as the old blank-company form made)."""
+    from api import security
+    from api.db import get_pool
+    email = f"strand-{t}@example.com"
+    with get_pool().connection() as conn:
+        uid = conn.execute(
+            "INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
+            (email, security.hash_password("password123"), f"Stranded {t}")).fetchone()["id"]
+    return str(uid), email
+
+
+def test_add_individual_account_to_existing_login(client, admin):
+    t = uuid.uuid4().hex[:6]
+    uid, email = _stranded(client, admin, t)
+    r = client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                    json={"account_type": "individual"})
+    assert r.status_code == 201, r.text
+    assert [m["company_name"] for m in r.json()["memberships"]] == [f"Stranded {t}"]
+    tok = client.post("/auth/login", json={"email": email, "password": "password123"}).json()
+    me = client.get("/me", headers=_auth(tok["access_token"])).json()
+    assert me["memberships"][0]["account_type"] == "individual"
+    # only one individual account per person
+    assert client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                       json={"account_type": "individual"}).status_code == 409
+    # ...but they can also join a company: now two accounts on one login
+    r = client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                    json={"company_id": admin["company_id"], "role": "Viewer"})
+    assert r.status_code == 201, r.text
+    assert len(client.get("/me", headers=_auth(tok["access_token"])).json()["memberships"]) == 2
+    # already a member -> 409; business without a company -> 422
+    assert client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                       json={"company_id": admin["company_id"]}).status_code == 409
+    assert client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                       json={}).status_code == 422
+    assert client.post(f"/admin/users/{uuid.uuid4()}/accounts", headers=admin["hdr"],
+                       json={"account_type": "individual"}).status_code == 404
+
+
+def test_add_account_restores_a_removed_membership_with_the_new_role(client, admin):
+    from api.db import get_pool
+    t = uuid.uuid4().hex[:6]
+    uid, _ = _stranded(client, admin, t)
+    client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                json={"company_name": f"Back Co {t}", "role": "Manager"})
+    with get_pool().connection() as conn:
+        conn.execute("UPDATE memberships SET deleted_at = now() WHERE user_id = %s", (uid,))
+        cid = conn.execute("SELECT id FROM companies WHERE name = %s",
+                           (f"Back Co {t}",)).fetchone()["id"]
+    r = client.post(f"/admin/users/{uid}/accounts", headers=admin["hdr"],
+                    json={"company_id": str(cid), "role": "Viewer"})
+    assert r.status_code == 201, r.text
+    assert r.json()["memberships"][0]["roles"] == ["Viewer"]
+
+
+def test_delete_unused_login_frees_the_email(client, admin):
+    t = uuid.uuid4().hex[:6]
+    uid, email = _stranded(client, admin, t)
+    client.post("/auth/login", json={"email": email, "password": "password123"})  # signed in once
+    r = client.delete(f"/admin/users/{uid}", headers=admin["hdr"])
+    assert r.status_code == 204, r.text
+    assert client.post("/auth/login", json={"email": email,
+                                            "password": "password123"}).status_code == 401
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": email, "name": "Again", "password": "password123", "account_type": "individual"})
+    assert r.status_code == 201, r.text
+    assert client.delete(f"/admin/users/{uid}", headers=admin["hdr"]).status_code == 404
+
+
+def test_delete_refuses_members_admins_history_and_self(client, admin):
+    from api.db import get_pool
+    t = uuid.uuid4().hex[:6]
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"member-{t}@example.com", "name": "M", "password": "password123",
+        "account_type": "individual"})
+    member = r.json()["id"]
+    assert client.delete(f"/admin/users/{member}", headers=admin["hdr"]).status_code == 409
+    # removed from its account, but the past membership is history -> refused
+    with get_pool().connection() as conn:
+        conn.execute("UPDATE memberships SET deleted_at = now() WHERE user_id = %s", (member,))
+    r = client.delete(f"/admin/users/{member}", headers=admin["hdr"])
+    assert r.status_code == 409 and "history" in r.json()["detail"]
+    pa = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": f"pa2-{t}@example.com", "name": "PA", "is_platform_admin": True}).json()["id"]
+    assert client.delete(f"/admin/users/{pa}", headers=admin["hdr"]).status_code == 409
+    assert client.delete(f"/admin/users/{admin['user_id']}", headers=admin["hdr"]).status_code == 422
+
+
+def test_duplicate_email_points_to_add_account(client, admin):
+    t = uuid.uuid4().hex[:6]
+    _, email = _stranded(client, admin, t)
+    r = client.post("/admin/users", headers=admin["hdr"], json={
+        "email": email, "name": "Dup", "account_type": "individual"})
+    assert r.status_code == 409 and "Add account" in r.json()["detail"]

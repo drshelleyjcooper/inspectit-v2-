@@ -46,6 +46,9 @@
   .secret { background:#FFF8E1; border:1px solid #F5D77A; border-radius:8px; padding:12px; margin-top:12px; font-family:ui-monospace,Menlo,monospace; word-break:break-all; }
   .pill.badge { background:var(--blue); color:#fff; font-weight:600; }
   .pill.new { background:#E3EDFB; color:var(--blue); } .pill.contacted { background:#FFF1DB; color:var(--attn); } .pill.closed { background:#EEF2F7; color:var(--muted); }
+  dialog { border:1px solid var(--line); border-radius:12px; padding:20px; max-width:min(520px, calc(100vw - 32px)); }
+  dialog::backdrop { background:rgba(11,33,56,.35); }
+  dialog .row > div { flex:1 1 200px; } dialog input, dialog select { width:100%; min-width:0; }
   .bar { display:inline-block; height:8px; background:var(--blue); border-radius:3px; vertical-align:middle; }
 </style>
 </head>
@@ -118,6 +121,23 @@
         <table id="userTable"></table>
         <div id="resetOut" class="secret hidden"></div>
       </div>
+      <dialog id="addAcct" aria-labelledby="addAcctTitle">
+        <h2 id="addAcctTitle">Add account</h2>
+        <p class="small muted" style="margin-top:0">Same login and password; this gives <b id="aaWho"></b> another account. In the app they pick it with <i>Switch account</i>.</p>
+        <div class="row">
+          <div><label for="aaType">Account type</label>
+            <select id="aaType"><option value="individual">Individual (their own)</option><option value="business">Business</option></select></div>
+          <div id="aaCompanyWrap" class="hidden"><label for="aaCompany">Company</label><select id="aaCompany"></select></div>
+          <div id="aaNewCoWrap" class="hidden"><label for="aaNewCo">New company name</label><input id="aaNewCo"></div>
+          <div id="aaRoleWrap" class="hidden"><label for="aaRole">Role</label><select id="aaRole"></select></div>
+          <div id="aaCompWrap"><label style="display:flex;gap:6px;align-items:center;color:var(--text);font-size:14px"><input type="checkbox" id="aaComp" style="min-width:0;width:auto"> Complimentary (test) account</label></div>
+        </div>
+        <div class="err" id="aaErr"></div>
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn" id="aaCancel" type="button">Cancel</button>
+          <button class="btn primary" id="aaSave" type="button">Add account</button>
+        </div>
+      </dialog>
     </section>
 
     <section id="tab-demos" class="hidden">
@@ -334,6 +354,48 @@ async function loadRoles() {
   sel.innerHTML = names.map(n => `<option>${esc(n)}</option>`).join("");
 }
 
+/* ---------- add account to an existing login ---------- */
+let aaUser = null;
+function aaSync() {
+  const indiv = $("aaType").value === "individual", nw = !indiv && $("aaCompany").value === "__new__";
+  $("aaCompanyWrap").classList.toggle("hidden", indiv);
+  $("aaRoleWrap").classList.toggle("hidden", indiv);
+  $("aaNewCoWrap").classList.toggle("hidden", !nw);
+  $("aaCompWrap").classList.toggle("hidden", !(indiv || nw));
+}
+async function openAddAccount(id, email) {
+  aaUser = id; $("aaWho").textContent = email; $("aaErr").textContent = "";
+  await loadCompaniesInto(); await loadRoles();
+  $("aaCompany").innerHTML = '<option value="">— choose —</option><option value="__new__">+ New company…</option>' +
+    companyCache.map(c => `<option value="${esc(c.id)}">${esc(c.name)}${c.account_type === "individual" ? " (individual)" : ""}</option>`).join("");
+  $("aaRole").innerHTML = $("cRole").innerHTML;
+  $("aaType").value = "individual"; $("aaNewCo").value = ""; $("aaComp").checked = false;
+  aaSync(); $("addAcct").showModal();
+}
+$("aaType").addEventListener("change", aaSync);
+$("aaCompany").addEventListener("change", aaSync);
+$("aaCancel").addEventListener("click", () => $("addAcct").close());
+$("aaSave").addEventListener("click", async () => {
+  $("aaErr").textContent = ""; $("aaSave").disabled = true;
+  try {
+    const body = { account_type: $("aaType").value };
+    if (body.account_type === "business") {
+      const co = $("aaCompany").value;
+      if (co === "__new__") body.company_name = $("aaNewCo").value.trim();
+      else if (co) body.company_id = co;
+      else throw new Error("Choose a company, or + New company…");
+      body.role = $("aaRole").value;
+    }
+    if (!$("aaCompWrap").classList.contains("hidden") && $("aaComp").checked) body.complimentary = true;
+    const { data } = await api("/admin/users/" + aaUser + "/accounts", { method: "POST", body });
+    $("addAcct").close();
+    const o = $("resetOut"); o.classList.remove("hidden");
+    o.textContent = data.email + " now has: " + data.memberships.map(m => m.company_name + " (" + (m.roles || []).join(", ") + ")").join(", ") + ". Same login and password.";
+    await loadUsers(); await loadCompaniesInto();
+  } catch (ex) { $("aaErr").textContent = ex.message; }
+  finally { $("aaSave").disabled = false; }
+});
+
 /* ---------- users ---------- */
 async function loadUsers() {
   const q = $("uSearch").value.trim();
@@ -347,9 +409,11 @@ async function loadUsers() {
       <td class="muted">${esc(ago(u.last_login_at))}</td>
       <td class="muted small">${esc(fmtDate(u.created_at))}</td>
       <td style="white-space:nowrap">
+        <button class="btn sm" data-act="add">Add account…</button>
         <button class="btn sm" data-act="email">Email reset link</button>
         <button class="btn sm" data-act="reset">Set password…</button>
         <button class="btn sm ${u.disabled_at ? "" : "danger"}" data-act="toggle">${u.disabled_at ? "Enable" : "Disable"}</button>
+        ${!u.memberships.length && !u.is_platform_admin ? '<button class="btn sm danger" data-act="delete">Delete</button>' : ""}
       </td></tr>`).join("");
 }
 $("uRefresh").addEventListener("click", loadUsers);
@@ -359,9 +423,14 @@ $("userTable").addEventListener("click", async e => {
   const btn = e.target.closest("button[data-act]"); if (!btn) return;
   const tr = btn.closest("tr"); const id = tr.dataset.id;
   const email = tr.querySelector(".small.muted").textContent;
+  if (btn.dataset.act === "add") { openAddAccount(id, email); return; }
   btn.disabled = true;
   try {
-    if (btn.dataset.act === "email") {
+    if (btn.dataset.act === "delete") {
+      if (!confirm("Permanently delete the login " + email + "? It belongs to no account. Its email can then be used again. This can't be undone.")) return;
+      await api("/admin/users/" + id, { method: "DELETE" });
+      await loadUsers();
+    } else if (btn.dataset.act === "email") {
       if (!confirm("Email " + email + " a link to choose a new password? Their current password keeps working until they use it.")) return;
       const { data } = await api("/admin/users/" + id + "/reset-password", { method: "POST", body: { send_email: true } });
       const o = $("resetOut"); o.classList.remove("hidden");

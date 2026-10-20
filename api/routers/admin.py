@@ -13,16 +13,20 @@ users.is_platform_admin (see permissions.platform_admin).
     GET   /admin/users?q=&limit=&offset=  users + memberships (search by email/name)
     POST  /admin/users                    create user (+ membership, optional new company)
     PATCH /admin/users/{id}               name / disable / platform-admin flag
+    POST  /admin/users/{id}/accounts      add an Individual account or a company membership
+    DELETE /admin/users/{id}              delete a login that belongs to no account
     POST  /admin/users/{id}/reset-password   set (or generate) a new password, or email a link
 
 Bootstrapping: PLATFORM_ADMIN_EMAILS env var -> promote_platform_admins()
 runs at startup. The frontend is web/admin.html.
 """
+import logging
 import secrets
 import string
 import uuid
 from typing import List, Literal, Optional
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
@@ -31,6 +35,8 @@ from .auth import issue_password_token
 from ..db import audit, get_pool
 from ..permissions import platform_admin
 from ..trial import access_state, timeline
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"],
                    dependencies=[Depends(platform_admin)])
@@ -359,6 +365,80 @@ def list_users(response: Response, q: Optional[str] = None,
     return [_user_out(r) for r in rows]
 
 
+def _validate_account(account_type: str, person_name: str, company_id, company_name,
+                      complimentary: bool, allow_none: bool = False) -> str:
+    """Check an account choice; returns the name of the company to create
+    ('' when joining an existing one or none)."""
+    new_company = (company_name or "").strip()
+    if account_type == "individual":
+        if company_id or new_company:
+            raise HTTPException(422, "An individual account has no company: leave "
+                                     "the company blank")
+        new_company = person_name.strip()
+    elif company_id and new_company:
+        raise HTTPException(422, "Give company_id OR company_name, not both")
+    elif not (company_id or new_company or allow_none):
+        raise HTTPException(422, "Choose a company (or create a new one), or make it "
+                                 "an Individual account. Without one they can't use the app.")
+    if complimentary and not new_company:
+        raise HTTPException(422, "complimentary applies to a new company: give "
+                                 "company_name, or use the Companies tab for an existing one")
+    return new_company
+
+
+def _attach_account(conn, admin, user_id, account_type, company_id, new_company,
+                    role, complimentary, event):
+    """Create the company (new_company) or find company_id, and make the user a
+    member with one role. Individuals always administer their own account.
+    Returns (company_id or None, role name)."""
+    role_name = DEFAULT_ROLE if account_type == "individual" else role
+    cid = None
+    if new_company:
+        cid = conn.execute(
+            """INSERT INTO companies (name, complimentary, account_type)
+               VALUES (%s, %s, %s) RETURNING id""",
+            (new_company, complimentary, account_type)).fetchone()["id"]
+    elif company_id:
+        cid = _uuid(company_id, "Company")
+        if not conn.execute(
+                "SELECT 1 FROM companies WHERE id = %s AND deleted_at IS NULL",
+                (cid,)).fetchone():
+            raise HTTPException(404, "Company not found")
+    if not cid:
+        return None, role_name
+    role_row = conn.execute(
+        """SELECT id FROM roles
+           WHERE name = %s AND deleted_at IS NULL
+             AND (company_id IS NULL OR company_id = %s)
+           ORDER BY company_id NULLS LAST LIMIT 1""",
+        (role_name, cid)).fetchone()
+    if not role_row:
+        raise HTTPException(422, f"Unknown role '{role_name}'")
+    existing = conn.execute(
+        "SELECT id, deleted_at FROM memberships WHERE company_id = %s AND user_id = %s",
+        (cid, user_id)).fetchone()
+    if existing and existing["deleted_at"] is None:
+        raise HTTPException(409, "They're already a member of that company")
+    if existing:
+        # Removed earlier: bring the membership back with only the new role.
+        membership = conn.execute(
+            """UPDATE memberships SET status = 'active', deleted_at = NULL, updated_at = now()
+               WHERE id = %s RETURNING id""", (existing["id"],)).fetchone()
+        conn.execute("DELETE FROM membership_roles WHERE membership_id = %s",
+                     (membership["id"],))
+    else:
+        membership = conn.execute(
+            "INSERT INTO memberships (company_id, user_id) VALUES (%s, %s) RETURNING id",
+            (cid, user_id)).fetchone()
+    conn.execute(
+        "INSERT INTO membership_roles (membership_id, role_id) VALUES (%s, %s)",
+        (membership["id"], role_row["id"]))
+    audit(conn, cid, admin["id"], "create", "membership", membership["id"],
+          {"event": event, "user_id": str(user_id), "role": role_name,
+           "account_type": account_type})
+    return cid, role_name
+
+
 class CreateUserIn(BaseModel):
     email: str = Field(min_length=5, max_length=320)
     name: str = Field(min_length=1, max_length=200)
@@ -387,27 +467,17 @@ class CreateUserIn(BaseModel):
 @router.post("/users", status_code=201)
 def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
     email = _normalize_email(body.email)
-    new_company = (body.company_name or "").strip()
     individual = body.account_type == "individual"
-    if individual:
-        if body.company_id or new_company:
-            raise HTTPException(422, "An individual account has no company: leave "
-                                     "the company blank")
-        new_company = body.name.strip()
-    elif body.company_id and new_company:
-        raise HTTPException(422, "Give company_id OR company_name, not both")
-    elif not (body.company_id or new_company or body.is_platform_admin):
-        raise HTTPException(422, "Choose a company (or create a new one), or make it "
-                                 "an Individual account. Without one they can't use the app.")
-    if body.complimentary and not new_company:
-        raise HTTPException(422, "complimentary applies to a new company: give "
-                                 "company_name, or use the Companies tab for an existing one")
+    new_company = _validate_account(body.account_type, body.name, body.company_id,
+                                    body.company_name, body.complimentary,
+                                    allow_none=body.is_platform_admin)
     if body.send_setup_email and body.password:
         raise HTTPException(422, "Give a password OR ask for the setup email, not both")
     password = body.password or _generate_password()
     with get_pool().connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE email = %s", (email,)).fetchone():
-            raise HTTPException(409, "An account with this email already exists")
+            raise HTTPException(409, "A login with this email already exists. To give "
+                                     "them another account, use Add account… on their row.")
         user = conn.execute(
             """INSERT INTO users (email, password_hash, name, is_platform_admin)
                VALUES (%s, %s, %s, %s) RETURNING id""",
@@ -415,40 +485,9 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
              body.is_platform_admin),
         ).fetchone()
 
-        company_id = None
-        role_name = DEFAULT_ROLE if individual else body.role
-        if new_company:
-            company_id = conn.execute(
-                """INSERT INTO companies (name, complimentary, account_type)
-                   VALUES (%s, %s, %s) RETURNING id""",
-                (new_company, body.complimentary, body.account_type)).fetchone()["id"]
-        elif body.company_id:
-            cid = _uuid(body.company_id, "Company")
-            if not conn.execute(
-                    "SELECT 1 FROM companies WHERE id = %s AND deleted_at IS NULL",
-                    (cid,)).fetchone():
-                raise HTTPException(404, "Company not found")
-            company_id = cid
-
-        if company_id:
-            role = conn.execute(
-                """SELECT id FROM roles
-                   WHERE name = %s AND deleted_at IS NULL
-                     AND (company_id IS NULL OR company_id = %s)
-                   ORDER BY company_id NULLS LAST LIMIT 1""",
-                (role_name, company_id)).fetchone()
-            if not role:
-                raise HTTPException(422, f"Unknown role '{role_name}'")
-            membership = conn.execute(
-                "INSERT INTO memberships (company_id, user_id) VALUES (%s, %s) RETURNING id",
-                (company_id, user["id"])).fetchone()
-            conn.execute(
-                "INSERT INTO membership_roles (membership_id, role_id) VALUES (%s, %s)",
-                (membership["id"], role["id"]))
-            audit(conn, company_id, admin["id"], "create", "membership",
-                  membership["id"], {"event": "admin_create_user",
-                                     "user_id": str(user["id"]), "role": role_name,
-                                     "account_type": body.account_type})
+        company_id, role_name = _attach_account(
+            conn, admin, user["id"], body.account_type, body.company_id, new_company,
+            body.role, body.complimentary, "admin_create_user")
         out = _user_out(_fetch_user(conn, user["id"]))
         setup_link = None
         if body.send_setup_email:
@@ -472,6 +511,70 @@ def create_user(body: CreateUserIn, admin: dict = Depends(platform_admin)):
     out["password"] = password
     out["password_generated"] = body.password is None
     return out
+
+
+class AddAccountIn(BaseModel):
+    """Give an existing login another account: their own Individual account,
+    or a membership in a company (existing or new). One email = one login;
+    a login can belong to several accounts (the app has a switcher)."""
+    account_type: Literal["business", "individual"] = "business"
+    company_id: Optional[str] = None
+    company_name: Optional[str] = Field(default=None, max_length=200)
+    role: str = DEFAULT_ROLE
+    complimentary: bool = False
+
+
+@router.post("/users/{user_id}/accounts", status_code=201)
+def add_account(user_id: str, body: AddAccountIn, admin: dict = Depends(platform_admin)):
+    uid = _uuid(user_id, "User")
+    with get_pool().connection() as conn:
+        u = conn.execute("SELECT id, name FROM users WHERE id = %s", (uid,)).fetchone()
+        if not u:
+            raise HTTPException(404, "User not found")
+        new_company = _validate_account(body.account_type, u["name"], body.company_id,
+                                        body.company_name, body.complimentary)
+        if body.account_type == "individual" and conn.execute(
+                """SELECT 1 FROM memberships m JOIN companies c ON c.id = m.company_id
+                   WHERE m.user_id = %s AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+                     AND c.account_type = 'individual'""", (uid,)).fetchone():
+            raise HTTPException(409, "They already have an individual account")
+        _attach_account(conn, admin, uid, body.account_type, body.company_id,
+                        new_company, body.role, body.complimentary, "admin_add_account")
+        return _user_out(_fetch_user(conn, uid))
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(user_id: str, admin: dict = Depends(platform_admin)):
+    """Permanently remove a login that belongs to no account (a typo, a false
+    start), so its email can be used again. Anyone who is a member anywhere,
+    is a platform admin, or has left a trail in a company (sent invitations,
+    uploads, a past membership) is refused: disable them instead."""
+    uid = _uuid(user_id, "User")
+    if uid == admin["id"]:
+        raise HTTPException(422, "You can't delete your own login")
+    with get_pool().connection() as conn:
+        u = conn.execute("SELECT is_platform_admin FROM users WHERE id = %s",
+                         (uid,)).fetchone()
+        if not u:
+            raise HTTPException(404, "User not found")
+        if u["is_platform_admin"]:
+            raise HTTPException(409, "Platform admins can't be deleted; remove the flag first")
+        if conn.execute(
+                """SELECT 1 FROM memberships m JOIN companies c ON c.id = m.company_id
+                   WHERE m.user_id = %s AND m.deleted_at IS NULL AND c.deleted_at IS NULL""",
+                (uid,)).fetchone():
+            raise HTTPException(409, "They belong to an account. Disable them instead, "
+                                     "or remove them from it first.")
+        try:
+            with conn.transaction():          # savepoint: an FK refusal leaves nothing half-done
+                conn.execute("DELETE FROM refresh_tokens WHERE user_id = %s", (uid,))
+                conn.execute("DELETE FROM password_resets WHERE user_id = %s", (uid,))
+                conn.execute("DELETE FROM users WHERE id = %s", (uid,))
+        except psycopg.errors.ForeignKeyViolation:
+            raise HTTPException(409, "They have history in a company (a past membership, "
+                                     "invitations or uploads). Disable them instead.")
+    log.info("platform admin %s deleted unused login %s", admin["id"], uid)
+    return Response(status_code=204)
 
 
 class UpdateUserIn(BaseModel):
