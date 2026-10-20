@@ -113,12 +113,14 @@ def test_without_the_option_behaviour_is_unchanged(client, admin_hdr, outbox):
     assert client.post("/auth/login", json={"email": body["email"], "password": d["password"]}).status_code == 200
 
 
-def test_user_without_company_gets_a_generic_welcome(client, admin_hdr, outbox):
+def test_individual_gets_a_generic_welcome(client, admin_hdr, outbox):
     t = _tag()
     r = client.post("/admin/users", headers=admin_hdr, json={
-        "name": "No Co", "email": f"noco-{t}@example.com", "send_setup_email": True})
+        "name": "Ivy Owner", "email": f"noco-{t}@example.com", "send_setup_email": True,
+        "account_type": "individual"})
     assert r.status_code == 201 and r.json()["setup_email_sent"] is True
     assert "Your role" not in outbox[0]["body"]
+    assert "set up for you" in outbox[0]["body"]          # no "for Ivy Owner" company line
 
 
 # ---------- emailed reset link for an existing user ----------
