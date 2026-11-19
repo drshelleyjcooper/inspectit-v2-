@@ -136,6 +136,51 @@ def _removed_records(old, new) -> int:
     return 0
 
 
+# Repairs recorded against an inspection's flagged items (the app's
+# insp.resolved map, keyed by item index). Inspectors hold
+# vehicle_inspections:edit so they can SAVE inspections, but recording or
+# undoing a repair is a manager's call: it needs edit on the entity head too
+# (vehicles / properties) — Company Administrator, Manager and the matching
+# domain manager. Added 2026-11-19.
+REPAIR_HEAD = {"inspections": "vehicles", "propertyInspections": "properties"}
+
+
+def _resolved(x):
+    r = x.get("resolved") if isinstance(x, dict) else None
+    return r or {}
+
+
+def _repair_changes(old, new) -> int:
+    """Inspection summaries whose `resolved` map differs between the stored
+    copy and the incoming one. Summaries have no id; they are matched by
+    savedAt (unique per save), falling back to position for ones without it.
+    A brand-new summary carrying repairs counts too."""
+    old, new = _as_json(old), _as_json(new)
+    if not isinstance(new, dict):
+        return 0
+    if not isinstance(old, dict):
+        old = {}
+    n = 0
+    for ent, items in new.items():
+        if not isinstance(items, list):
+            continue
+        prev = old.get(ent)
+        prev = prev if isinstance(prev, list) else []
+        by_saved = {x["savedAt"]: x for x in prev
+                    if isinstance(x, dict) and x.get("savedAt")}
+        for i, x in enumerate(items):
+            if not isinstance(x, dict):
+                continue
+            if x.get("savedAt"):
+                match = by_saved.get(x["savedAt"])
+            else:
+                match = prev[i] if i < len(prev) and isinstance(prev[i], dict) \
+                    and not prev[i].get("savedAt") else None
+            if _resolved(x) != _resolved(match):
+                n += 1
+    return n
+
+
 def _check(ctx: AuthContext, key: str, action: str):
     key = key.split("inspectit.", 1)[-1]
     if key in FORBIDDEN_KEYS or key not in KEY_MODULE:
@@ -228,6 +273,13 @@ def put_collection(key: str, body: PutCollectionIn,
                     403, f"Requires {KEY_MODULE[key]}:delete — this write "
                          f"would remove {removed} record(s), and only "
                          "Company Administrator may delete (§4.1)")
+        if key in REPAIR_HEAD:
+            head = REPAIR_HEAD[key]
+            if ctx.grant_scope(head, "edit") != "company" and _repair_changes(
+                    current["data"] if current is not None else None, body.data):
+                raise HTTPException(
+                    403, f"Requires {head}:edit — only managers and "
+                         "administrators may mark inspection items repaired")
         # Photos/PDFs go to file storage; the stored record keeps links.
         data, moved = externalize(conn, ctx.company_id, ctx.user["id"],
                                   body.data)

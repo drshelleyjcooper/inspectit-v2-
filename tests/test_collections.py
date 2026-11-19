@@ -224,3 +224,50 @@ def test_maintenance_state_is_still_an_edit(client):
                 {"v1": {"Engine::Oil": {"d": "2026-09-01", "o": 84000}}}
                 ).status_code == 200
     assert _put(client, mgr, "vehicleMaintenance", {"v1": {}}).status_code == 200
+
+
+# --- repairs on flagged inspection items (2026-11-19) ---------------------
+# Inspectors save inspections (vehicle_inspections:edit) but may not record or
+# undo a repair: that needs edit on the entity head (vehicles/properties).
+
+def test_repairs_need_manager(client):
+    admin, mgr, insp = STATE["admin"], STATE["manager"], STATE["inspector"]
+    base = {"p1": [{"savedAt": "2026-11-01T10:00:00Z", "flagged": 2,
+                    "record": {"items": [{"status": "defect"}, {"status": "attn"}]}}]}
+    assert _put(client, admin, "propertyInspections", base).status_code == 200
+
+    fix = {"0": {"on": "2026-11-18", "by": "Max", "note": "replaced"}}
+    fixed = {"p1": [dict(base["p1"][0], resolved=fix)]}
+    # Property Inspector: may not mark repaired ...
+    r = _put(client, insp, "propertyInspections", fixed)
+    assert r.status_code == 403 and "properties:edit" in r.text
+    # ... nor sneak a repair in on a brand-new inspection.
+    sneaky = {"p1": [{"savedAt": "2026-11-19T09:00:00Z", "resolved": fix}] + base["p1"]}
+    assert _put(client, insp, "propertyInspections", sneaky).status_code == 403
+    # Saving a new inspection (no repairs) is still fine for the inspector.
+    newer = {"p1": [{"savedAt": "2026-11-19T09:00:00Z", "flagged": 0}] + base["p1"]}
+    assert _put(client, insp, "propertyInspections", newer).status_code == 200
+
+    # Manager may mark it repaired; the new inspection's position doesn't matter.
+    ok = {"p1": [newer["p1"][0], dict(base["p1"][0], resolved=fix)]}
+    assert _put(client, mgr, "propertyInspections", ok).status_code == 200
+    # Inspector re-sending the same data (repair unchanged) is fine ...
+    assert _put(client, insp, "propertyInspections", ok).status_code == 200
+    # ... but undoing it is not.
+    assert _put(client, insp, "propertyInspections", newer).status_code == 403
+    # Manager may undo.
+    assert _put(client, mgr, "propertyInspections", newer).status_code == 200
+
+
+def test_repair_changes_helper():
+    from api.routers.collections import _repair_changes
+    a = {"v1": [{"savedAt": "s1"}, {"date": "x"}]}
+    assert _repair_changes(a, a) == 0
+    assert _repair_changes(None, {"v1": [{"savedAt": "s1"}]}) == 0
+    assert _repair_changes(a, {"v1": [{"savedAt": "s1", "resolved": {}}]}) == 0  # empty map = none
+    assert _repair_changes(a, {"v1": [{"savedAt": "s1", "resolved": {"1": {"on": "d"}}}]}) == 1
+    # id-less, savedAt-less summaries match by position
+    assert _repair_changes(a, {"v1": [{"savedAt": "s1"}, {"date": "x", "resolved": {"0": {"on": "d"}}}]}) == 1
+    # JSON-string export format
+    import json
+    assert _repair_changes(json.dumps(a), json.dumps(a)) == 0
